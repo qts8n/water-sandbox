@@ -1,6 +1,6 @@
 use bevy::{
     prelude::*,
-    transform::TransformSystem,
+    // transform::TransformSystem,
     ecs::schedule::ScheduleBuildSettings,
 };
 
@@ -39,15 +39,13 @@ impl Plugin for SchedulePlugin {
                 InGameSet::UserInput,
                 InGameSet::EntityUpdates,
             ).chain().run_if(in_state(GameState::InGame)))
-            .configure_sets(PostUpdate, (
+            .insert_resource(Time::<Fixed>::from_seconds(1. / 60.))
+            .configure_sets(FixedUpdate, (
                 PhysicsSet::PropertyUpdates,
                 PhysicsSet::PositionUpdates,
-                // Flush point [#2] goes here
                 PhysicsSet::CollisionDetection,
-            ).chain().before(TransformSystem::TransformPropagate).run_if(in_state(GameState::InGame)))
+            ).chain().run_if(in_state(GameState::InGame)))
             // Insert a flush point [#1]
-            .add_systems(Update, apply_deferred.after(InGameSet::DespawnEntities).before(InGameSet::UserInput))
-            // Insert a flush point [#2]
-            .add_systems(PostUpdate, apply_deferred.after(PhysicsSet::PositionUpdates).before(PhysicsSet::CollisionDetection));
+            .add_systems(Update, apply_deferred.after(InGameSet::DespawnEntities).before(InGameSet::UserInput));
     }
 }

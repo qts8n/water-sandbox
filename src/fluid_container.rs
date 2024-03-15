@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::schedule::InGameSet;
 
-const FLUID_CONTAINER_SIZE: Vec2 = Vec2::new(800., 640.);
+const FLUID_CONTAINER_SIZE: Vec2 = Vec2::new(16., 9.);
 const FLUID_CONTAINER_POSITION: Vec2 = Vec2::ZERO;
 
 
@@ -18,13 +18,6 @@ pub struct FluidContainer {
 
 
 impl FluidContainer {
-    fn new(position: Vec2, size: Vec2) -> Self {
-        Self {
-            position,
-            size,
-        }
-    }
-
     pub fn get_extents(&self) -> (Vec2, Vec2) {
         let half_size = self.size / 2.;
         (
@@ -37,7 +30,10 @@ impl FluidContainer {
 
 impl Default for FluidContainer {
     fn default() -> Self {
-        Self::new(FLUID_CONTAINER_POSITION, FLUID_CONTAINER_SIZE)
+        Self {
+            position: FLUID_CONTAINER_POSITION,
+            size: FLUID_CONTAINER_SIZE,
+        }
     }
 }
 

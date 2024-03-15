@@ -6,20 +6,21 @@ use bevy::{
 };
 use rand::Rng;
 
-use crate::schedule::PhysicsSet;
+use crate::schedule::{InGameSet, PhysicsSet};
+use crate::state::GameState;
 use crate::fluid_container::FluidContainer;
 use crate::gravity::Gravity;
 
-const N_SIZE: usize = 40;
+const N_SIZE: usize = 50;
 const STARTING_COLOR: Color = Color::rgb(0.16, 0.71, 0.97);
 
-const PARTICLE_RADIUS: f32 = 2.;
+const PARTICLE_RADIUS: f32 = 0.05;
 const PARTICLE_COLLISION_DAMPING: f32 = 0.95;
 const PARTICLE_MASS: f32 = 1.;
-const PARTICLE_SMOOTHING_RADIUS: f32 = 10.;
+const PARTICLE_SMOOTHING_RADIUS: f32 = 0.1;
 const PARTICLE_TARGET_DENSITY: f32 = 6.;
-const PARTICLE_PRESSURE_SCALAR: f32 = 60.;
-const PARTICLE_NEAR_PRESSURE_SCALAR: f32 = 10.;
+const PARTICLE_PRESSURE_SCALAR: f32 = 10.;
+const PARTICLE_NEAR_PRESSURE_SCALAR: f32 = 1.;
 
 
 #[derive(Component, Default, Debug)]
@@ -92,13 +93,13 @@ pub struct FluidParticleBundle {
 
 #[derive(Resource, Debug)]
 pub struct FluidParticleStaticProperties {
-    radius: f32,
-    collision_damping: f32,
-    mass: f32,
-    smoothing_radius: f32,
-    target_density: f32,
-    pressure_scalar: f32,
-    near_pressure_scalar: f32,
+    pub radius: f32,
+    pub collision_damping: f32,
+    pub mass: f32,
+    pub smoothing_radius: f32,
+    pub target_density: f32,
+    pub pressure_scalar: f32,
+    pub near_pressure_scalar: f32,
 }
 
 
@@ -128,15 +129,17 @@ impl Plugin for FluidPlugin {
     fn build(&self, app: &mut App) {
         app
             .init_resource::<FluidParticleStaticProperties>()
-            .add_systems(PostStartup, spawn_water)
-            .add_systems(PostUpdate, (
+            .add_systems(Startup, spawn_liquid)
+            .add_systems(OnEnter(GameState::GameOver), spawn_liquid)
+            .add_systems(Update, despawn_liquid.in_set(InGameSet::DespawnEntities))
+            .add_systems(FixedUpdate, (
                 apply_external_forces,
                 update_predicted_positions,
                 update_density_and_pressure,
                 update_pressure_force,
                 update_acceleration_and_velocity,
             ).chain().in_set(PhysicsSet::PropertyUpdates))
-            .add_systems(PostUpdate, (
+            .add_systems(FixedUpdate, (
                 update_position,
                 update_velocity_on_collision,
             ).chain().in_set(PhysicsSet::PositionUpdates));
@@ -172,7 +175,7 @@ pub fn random_fluid(nparticles: usize, ext_min: Vec2, ext_max: Vec2) -> Vec<Vec2
 }
 
 
-fn spawn_water(
+fn spawn_liquid(
     mut commands: Commands,
     fluid_props: Res<FluidParticleStaticProperties>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -211,7 +214,7 @@ fn spawn_water(
 fn apply_external_forces(
     mut query: Query<&mut Velocity, With<FluidParticle>>,
     gravity: Res<Gravity>,
-    time: Res<Time>,
+    time: Res<Time<Fixed>>,
 ) {
     query.par_iter_mut().for_each(|mut velocity| {
         velocity.value += gravity.value * time.delta_seconds();
@@ -221,7 +224,7 @@ fn apply_external_forces(
 
 fn update_predicted_positions(mut query: Query<(&mut PredictedPosition, &Velocity, &Transform), With<FluidParticle>>) {
     query.par_iter_mut().for_each(|(mut predicted_position, velocity, transform)| {
-        predicted_position.value = transform.translation.xy() + velocity.value / 60.;
+        predicted_position.value = transform.translation.xy() + velocity.value * 1. / 120.;
     });
 }
 
@@ -355,7 +358,7 @@ fn update_pressure_force(
 
                 let direction: Vec2;
                 if distance > 0. {
-                    direction = ((position.value - neighbor_position.value) / distance).xy();
+                    direction = (position.value - neighbor_position.value) / distance * -1.;
                 } else {
                     direction = Vec2::Y;
                 }
@@ -377,7 +380,7 @@ fn update_pressure_force(
 
 fn update_acceleration_and_velocity(
     mut query: Query<(&mut Acceleration, &mut Velocity, &PressureForce, &Density), With<FluidParticle>>,
-    time: Res<Time>,
+    time: Res<Time<Fixed>>,
 ) {
     query.par_iter_mut().for_each(|(mut acceleration, mut velocity, pressure_force, density)| {
         let pressure_acceleration = pressure_force.value / density.value;
@@ -417,8 +420,27 @@ fn update_velocity_on_collision(
 }
 
 
-fn update_position(mut query: Query<(&Velocity, &mut Transform), With<FluidParticle>>, time: Res<Time>) {
+fn update_position(mut query: Query<(&Velocity, &mut Transform), With<FluidParticle>>, time: Res<Time<Fixed>>) {
     query.par_iter_mut().for_each(|(velocity, mut transform)| {
         transform.translation += velocity.value.extend(0.) * time.delta_seconds();
     });
+}
+
+
+fn despawn_liquid(
+    mut commands: Commands,
+    query: Query<Entity, With<FluidParticle>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if !keyboard_input.just_pressed(KeyCode::Space) {
+        return;
+    }
+
+    for particle in query.iter() {
+        let Some(particle_commands) = commands.get_entity(particle) else { continue };
+        particle_commands.despawn_recursive();
+    }
+
+    next_state.set(GameState::GameOver);
 }
