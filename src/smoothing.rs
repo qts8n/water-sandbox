@@ -45,3 +45,12 @@ pub fn smoothing_kernel_derivative_near(radius: f32, distance: f32) -> f32 {
     let v = distance - radius;
     v * v * scale
 }
+
+pub fn smoothing_kernel_viscosity(radius: f32, distance: f32) -> f32 {
+    if distance > radius {
+        return 0.;
+    }
+    let volume = 4. / (PI * radius.powi(8));
+    let v = radius * radius - distance * distance;
+    v * v * v * volume
+}

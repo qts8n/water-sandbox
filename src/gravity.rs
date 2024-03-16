@@ -10,7 +10,15 @@ pub struct Gravity {
 
 
 impl Gravity {
-    fn new(value: Vec2) -> Self { Self { value } }
+    pub fn new(value: Vec2) -> Self { Self { value } }
+
+    pub fn set_zero(&mut self) {
+        self.value = Vec2::ZERO;
+    }
+
+    pub fn set_default(&mut self) {
+        self.value = Vec2::new(0., -GRAVITY_FORCE);
+    }
 }
 
 

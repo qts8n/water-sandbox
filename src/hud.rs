@@ -8,7 +8,7 @@ use crate::fluid::FluidParticleStaticProperties;
 const TEXT_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
 const TEXT_FONT_SIZE: f32 = 20.;
 
-const FLUID_PROPS_CHANGE_STEP: f32 = 0.05;
+const FLUID_PROPS_CHANGE_STEP: f32 = 0.1;
 
 
 #[derive(Component, Debug)]
@@ -25,6 +25,10 @@ pub struct NearPressureHudItem;
 
 #[derive(Component, Debug)]
 pub struct TargetDensityHudItem;
+
+
+#[derive(Component, Debug)]
+pub struct ViscosityHudItem;
 
 
 #[derive(Component, Debug)]
@@ -47,6 +51,7 @@ impl Plugin for HudPlugin {
                     update_pressure_in_hud,
                     update_near_pressure_in_hud,
                     update_target_density_in_hud,
+                    update_viscosity_in_hud,
                     update_smoothing_radius_in_hud,
                     update_gravity_in_hud,
                 ),
@@ -95,6 +100,14 @@ fn setup_hud(mut commands: Commands) {
             TargetDensityHudItem,
         ));
         parent.spawn((
+            TextBundle::from_section("Viscosity: 0", TextStyle {
+                font_size: TEXT_FONT_SIZE,
+                color: TEXT_COLOR,
+                ..default()
+            }),
+            ViscosityHudItem,
+        ));
+        parent.spawn((
             TextBundle::from_section("Smoothing Radius: 0", TextStyle {
                 font_size: TEXT_FONT_SIZE,
                 color: TEXT_COLOR,
@@ -119,26 +132,34 @@ fn update_fluid_props(
     mut gravity: ResMut<Gravity>,
     keyboard_input: Res<ButtonInput<KeyCode>>
 ) {
-    if keyboard_input.pressed(KeyCode::Digit1) && fluid_props.smoothing_radius - FLUID_PROPS_CHANGE_STEP > 0. {
+    if keyboard_input.just_pressed(KeyCode::Digit1) && fluid_props.smoothing_radius - FLUID_PROPS_CHANGE_STEP > 0. {
         fluid_props.smoothing_radius -= FLUID_PROPS_CHANGE_STEP;
-    } else if keyboard_input.pressed(KeyCode::Digit2) {
+    } else if keyboard_input.just_pressed(KeyCode::Digit2) {
         fluid_props.smoothing_radius += FLUID_PROPS_CHANGE_STEP;
-    } else if keyboard_input.pressed(KeyCode::Digit3) {
-        gravity.value.y += FLUID_PROPS_CHANGE_STEP;
-    } else if keyboard_input.pressed(KeyCode::Digit4) {
-        gravity.value.y -= FLUID_PROPS_CHANGE_STEP;
-    } else if keyboard_input.pressed(KeyCode::KeyQ) {
+    } else if keyboard_input.just_pressed(KeyCode::KeyQ) {
         fluid_props.pressure_scalar -= FLUID_PROPS_CHANGE_STEP;
-    } else if keyboard_input.pressed(KeyCode::KeyW) {
+    } else if keyboard_input.just_pressed(KeyCode::KeyW) {
         fluid_props.pressure_scalar += FLUID_PROPS_CHANGE_STEP;
-    } else if keyboard_input.pressed(KeyCode::KeyA) {
+    } else if keyboard_input.just_pressed(KeyCode::KeyA) {
         fluid_props.near_pressure_scalar -= FLUID_PROPS_CHANGE_STEP;
-    } else if keyboard_input.pressed(KeyCode::KeyS) {
+    } else if keyboard_input.just_pressed(KeyCode::KeyS) {
         fluid_props.near_pressure_scalar += FLUID_PROPS_CHANGE_STEP;
-    } else if keyboard_input.pressed(KeyCode::KeyZ) {
+    } else if keyboard_input.just_pressed(KeyCode::KeyZ) {
         fluid_props.target_density -= FLUID_PROPS_CHANGE_STEP;
-    } else if keyboard_input.pressed(KeyCode::KeyX) {
+    } else if keyboard_input.just_pressed(KeyCode::KeyX) {
         fluid_props.target_density += FLUID_PROPS_CHANGE_STEP;
+    } else if keyboard_input.just_pressed(KeyCode::Digit3) {
+        gravity.value.y += FLUID_PROPS_CHANGE_STEP;
+    } else if keyboard_input.just_pressed(KeyCode::Digit4) {
+        gravity.value.y -= FLUID_PROPS_CHANGE_STEP;
+    } else if keyboard_input.just_pressed(KeyCode::KeyE) {
+        fluid_props.viscosity_strength -= FLUID_PROPS_CHANGE_STEP;
+    } else if keyboard_input.just_pressed(KeyCode::KeyR) {
+        fluid_props.viscosity_strength += FLUID_PROPS_CHANGE_STEP;
+    } else if keyboard_input.just_pressed(KeyCode::Digit0) {
+        gravity.set_zero();
+    } else if keyboard_input.just_pressed(KeyCode::Digit9) {
+        gravity.set_default();
     }
 
 }
@@ -168,6 +189,15 @@ fn update_target_density_in_hud(mut query: Query<&mut Text, With<TargetDensityHu
         return;
     }
     target_density_hud_item.sections[0].value = format!("tD: {:.3}", fluid_props.target_density);
+}
+
+
+fn update_viscosity_in_hud(mut query: Query<&mut Text, With<ViscosityHudItem>>, fluid_props: Res<FluidParticleStaticProperties>) {
+    let Ok(mut viscosity_hud_item) = query.get_single_mut() else { return };
+    if viscosity_hud_item.sections.is_empty() {
+        return;
+    }
+    viscosity_hud_item.sections[0].value = format!("Viscosity: {:.3}", fluid_props.viscosity_strength);
 }
 
 

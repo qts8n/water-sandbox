@@ -8,15 +8,17 @@ use crate::fluid_container::FluidContainer;
 use crate::gravity::Gravity;
 
 const N_SIZE: usize = 50;
-const STARTING_COLOR: Color = Color::rgb(0.16, 0.71, 0.97);
 
+const PARTICLE_COLOR: Color = Color::rgb(0.16, 0.71, 0.97);
 const PARTICLE_RADIUS: f32 = 0.05;
 const PARTICLE_COLLISION_DAMPING: f32 = 0.3;
 const PARTICLE_MASS: f32 = 1.;
-const PARTICLE_SMOOTHING_RADIUS: f32 = 0.15;
+const PARTICLE_SMOOTHING_RADIUS: f32 = 0.2;
 const PARTICLE_TARGET_DENSITY: f32 = 10.;
 const PARTICLE_PRESSURE_SCALAR: f32 = 30.;
 const PARTICLE_NEAR_PRESSURE_SCALAR: f32 = 2.;
+const PARTICLE_VISCOSITY_STRENGTH: f32 = 0.1;
+const PARTICLE_LOOKAHEAD_SCALAR: f32 = 1. / 60.;  // 60 Hz
 
 
 #[derive(Component, Default, Debug)]
@@ -71,6 +73,7 @@ pub struct FluidParticleStaticProperties {
     pub target_density: f32,
     pub pressure_scalar: f32,
     pub near_pressure_scalar: f32,
+    pub viscosity_strength: f32,
 }
 
 
@@ -84,6 +87,7 @@ impl Default for FluidParticleStaticProperties {
             target_density: PARTICLE_TARGET_DENSITY,
             pressure_scalar: PARTICLE_PRESSURE_SCALAR,
             near_pressure_scalar: PARTICLE_NEAR_PRESSURE_SCALAR,
+            viscosity_strength: PARTICLE_VISCOSITY_STRENGTH,
         }
     }
 }
@@ -120,8 +124,7 @@ fn spawn_liquid(
     // container: Res<FluidContainer>,
 ) {
     let shape = Mesh2dHandle(meshes.add(Circle { radius: fluid_props.radius }));
-    let material = materials.add(STARTING_COLOR);
-
+    let material = materials.add(PARTICLE_COLOR);
     let points = helpers::cube_fluid(N_SIZE, N_SIZE, fluid_props.radius);
 
     // let (ext_min, ext_max) = container.get_extents();
@@ -161,9 +164,11 @@ fn integrate_positions(
         mut transform,
         acceleration,
     )| {
+        // Integrate positions using accumulated acceleration
         velocity.value += (gravity.value + acceleration.value) / fluid_props.mass * time.delta_seconds();
         transform.translation += velocity.value.extend(0.) * time.delta_seconds();
 
+        // Handle collisions
         if transform.translation.x < ext_min.x {
             velocity.value.x *= -1. * fluid_props.collision_damping;
             transform.translation.x = ext_min.x;
@@ -180,7 +185,8 @@ fn integrate_positions(
             transform.translation.y = ext_max.y;
         }
 
-        predicted_position.value = transform.translation.xy() + velocity.value * 1. / 120.;
+        // Predict future position values
+        predicted_position.value = transform.translation.xy() + velocity.value * PARTICLE_LOOKAHEAD_SCALAR;
     });
 }
 
@@ -194,6 +200,7 @@ fn update_density_and_pressure(
         let mut new_density = 0.;
         let mut new_near_density = 0.;
 
+        // Accumulate density amongst neighbours
         for neighbor_position in neighbor_query.iter() {
             let distance = position.value.distance(neighbor_position.value);
             if distance > fluid_props.smoothing_radius {
@@ -204,6 +211,7 @@ fn update_density_and_pressure(
             new_near_density += smoothing::smoothing_kernel_near(fluid_props.smoothing_radius, distance);
         }
 
+        // Take mass into account and calculate pressure by converting the density
         props.density = fluid_props.mass * new_density + smoothing::DENSITY_PADDING;
         props.pressure = fluid_props.pressure_scalar * (props.density - fluid_props.target_density);
 
@@ -214,19 +222,26 @@ fn update_density_and_pressure(
 
 
 fn update_pressure_force(
-    mut query: Query<(Entity, &mut Acceleration, &FluidParticleProperties, &PredictedPosition), With<FluidParticle>>,
-    neighbor_query: Query<(Entity, &FluidParticleProperties, &PredictedPosition), With<FluidParticle>>,
+    mut query: Query<(Entity, &mut Acceleration, &Velocity, &FluidParticleProperties, &PredictedPosition), With<FluidParticle>>,
+    neighbor_query: Query<(Entity, &Velocity, &FluidParticleProperties, &PredictedPosition), With<FluidParticle>>,
     fluid_props: Res<FluidParticleStaticProperties>,
 ) {
     query.par_iter_mut().for_each(|(
         particle,
         mut acceleration,
+        velocity,
         props,
         position,
     )| {
-        let mut new_pressure_force = Vec2::ZERO;
+        let mut pressure_force = Vec2::ZERO;
+        let mut viscosity_force = Vec2::ZERO;
 
-        for (neighbor, neighbor_props, neighbor_position) in neighbor_query.iter() {
+        for (
+            neighbor,
+            neighbor_velocity,
+            neighbor_props,
+            neighbor_position,
+        ) in neighbor_query.iter() {
             if particle == neighbor {
                 continue;
             }
@@ -241,17 +256,24 @@ fn update_pressure_force(
             } else {
                 direction = Vec2::Y;
             }
+            direction *= fluid_props.mass;
 
+            // Calculate pressure contribution taking into account shared pressure
             let slope = smoothing::smoothing_kernel_derivative(fluid_props.smoothing_radius, distance);
             let shared_pressure = (props.pressure + neighbor_props.pressure) / 2.;
 
+            // Calculate near pressure contribution
             let slope_near = smoothing::smoothing_kernel_derivative_near(fluid_props.smoothing_radius, distance);
             let shared_pressure_near = (props.near_pressure + neighbor_props.near_pressure) / 2.;
 
-            new_pressure_force += direction * shared_pressure * slope * fluid_props.mass / neighbor_props.density;
-            new_pressure_force += direction * shared_pressure_near * slope_near * fluid_props.mass / neighbor_props.near_density;
+            pressure_force += direction * shared_pressure * slope / neighbor_props.density;
+            pressure_force += direction * shared_pressure_near * slope_near / neighbor_props.near_density;
+
+            // Calculate viscosity contribution
+            let viscosity = smoothing::smoothing_kernel_viscosity(fluid_props.smoothing_radius, distance);
+            viscosity_force += (neighbor_velocity.value - velocity.value) * viscosity;
         }
-        acceleration.value = new_pressure_force / props.density;
+        acceleration.value = pressure_force / props.density + viscosity_force * fluid_props.viscosity_strength;
     });
 }
 
