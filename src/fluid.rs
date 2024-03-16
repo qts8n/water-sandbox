@@ -32,12 +32,6 @@ pub struct Acceleration {
 
 
 #[derive(Component, Default, Debug)]
-pub struct PressureForce {
-    pub value: Vec2,
-}
-
-
-#[derive(Component, Default, Debug)]
 pub struct PredictedPosition {
     pub value: Vec2,
 }
@@ -47,43 +41,24 @@ pub struct PredictedPosition {
 pub struct MovingObjectBundle {
     pub velocity: Velocity,
     pub acceleration: Acceleration,
-    pub pressure_force: PressureForce,
     pub predicted_position: PredictedPosition,
 }
 
 
 #[derive(Component, Default, Debug)]
-pub struct Density {
-    pub value: f32,
-}
-
-
-#[derive(Component, Default, Debug)]
-pub struct NearDensity {
-    pub value: f32,
-}
-
-
-#[derive(Component, Default, Debug)]
-pub struct Pressure {
-    pub value: f32,
-}
-
-
-#[derive(Component, Default, Debug)]
-pub struct NearPressure {
-    pub value: f32,
+pub struct FluidParticleProperties {
+    pub density: f32,
+    pub near_density: f32,
+    pub pressure: f32,
+    pub near_pressure: f32,
 }
 
 
 #[derive(Bundle, Default)]
 pub struct FluidParticleBundle {
-    density: Density,
-    near_density: NearDensity,
-    pressure: Pressure,
-    near_pressure: NearPressure,
-    mesh_bundle: MaterialMesh2dBundle<ColorMaterial>,
-    moving_object_bundle: MovingObjectBundle,
+    pub properties: FluidParticleProperties,
+    pub mesh_bundle: MaterialMesh2dBundle<ColorMaterial>,
+    pub moving_object_bundle: MovingObjectBundle,
 }
 
 
@@ -211,17 +186,11 @@ fn integrate_positions(
 
 
 fn update_density_and_pressure(
-    mut query: Query<(&mut Density, &mut NearDensity, &mut Pressure, &mut NearPressure, &PredictedPosition), With<FluidParticle>>,
+    mut query: Query<(&mut FluidParticleProperties, &PredictedPosition), With<FluidParticle>>,
     neighbor_query: Query<&PredictedPosition, With<FluidParticle>>,
     fluid_props: Res<FluidParticleStaticProperties>,
 ) {
-    query.par_iter_mut().for_each(|(
-        mut density,
-        mut near_density,
-        mut pressure,
-        mut near_pressure,
-        position,
-    )| {
+    query.par_iter_mut().for_each(|(mut props, position)| {
         let mut new_density = 0.;
         let mut new_near_density = 0.;
 
@@ -235,39 +204,29 @@ fn update_density_and_pressure(
             new_near_density += smoothing::smoothing_kernel_near(fluid_props.smoothing_radius, distance);
         }
 
-        density.value = fluid_props.mass * new_density + smoothing::DENSITY_PADDING;
-        pressure.value = fluid_props.pressure_scalar * (density.value - fluid_props.target_density);
+        props.density = fluid_props.mass * new_density + smoothing::DENSITY_PADDING;
+        props.pressure = fluid_props.pressure_scalar * (props.density - fluid_props.target_density);
 
-        near_density.value = fluid_props.mass * new_near_density + smoothing::DENSITY_PADDING;
-        near_pressure.value = fluid_props.near_pressure_scalar * near_density.value;
+        props.near_density = fluid_props.mass * new_near_density + smoothing::DENSITY_PADDING;
+        props.near_pressure = fluid_props.near_pressure_scalar * props.near_density;
     });
 }
 
 
 fn update_pressure_force(
-    mut query: Query<(Entity, &mut PressureForce, &mut Acceleration, &Density, &Pressure, &NearPressure, &PredictedPosition), With<FluidParticle>>,
-    neighbor_query: Query<(Entity, &Density, &NearDensity, &Pressure, &NearPressure, &PredictedPosition), With<FluidParticle>>,
+    mut query: Query<(Entity, &mut Acceleration, &FluidParticleProperties, &PredictedPosition), With<FluidParticle>>,
+    neighbor_query: Query<(Entity, &FluidParticleProperties, &PredictedPosition), With<FluidParticle>>,
     fluid_props: Res<FluidParticleStaticProperties>,
 ) {
     query.par_iter_mut().for_each(|(
         particle,
-        mut pressure_force,
         mut acceleration,
-        density,
-        pressure,
-        near_pressure,
+        props,
         position,
     )| {
         let mut new_pressure_force = Vec2::ZERO;
 
-        for (
-            neighbor,
-            neighbor_density,
-            neighbor_near_density,
-            neighbor_pressure,
-            neighbor_near_pressure,
-            neighbor_position
-        ) in neighbor_query.iter() {
+        for (neighbor, neighbor_props, neighbor_position) in neighbor_query.iter() {
             if particle == neighbor {
                 continue;
             }
@@ -284,16 +243,15 @@ fn update_pressure_force(
             }
 
             let slope = smoothing::smoothing_kernel_derivative(fluid_props.smoothing_radius, distance);
-            let shared_pressure = (pressure.value + neighbor_pressure.value) / 2.;
+            let shared_pressure = (props.pressure + neighbor_props.pressure) / 2.;
 
             let slope_near = smoothing::smoothing_kernel_derivative_near(fluid_props.smoothing_radius, distance);
-            let shared_pressure_near = (near_pressure.value + neighbor_near_pressure.value) / 2.;
+            let shared_pressure_near = (props.near_pressure + neighbor_props.near_pressure) / 2.;
 
-            new_pressure_force += direction * shared_pressure * slope * fluid_props.mass / neighbor_density.value;
-            new_pressure_force += direction * shared_pressure_near * slope_near * fluid_props.mass / neighbor_near_density.value;
+            new_pressure_force += direction * shared_pressure * slope * fluid_props.mass / neighbor_props.density;
+            new_pressure_force += direction * shared_pressure_near * slope_near * fluid_props.mass / neighbor_props.near_density;
         }
-        pressure_force.value = new_pressure_force;
-        acceleration.value = new_pressure_force / density.value;  // maybe div by density
+        acceleration.value = new_pressure_force / props.density;
     });
 }
 
