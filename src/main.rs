@@ -1,7 +1,13 @@
+// Misc.
+mod smoothing;
+mod helpers;
+
+// App
 mod state;
 mod schedule;
 mod debug;
 mod camera;
+mod menu;
 mod hud;
 mod fluid_container;
 mod field;
@@ -10,6 +16,7 @@ mod fluid;
 
 use bevy::prelude::*;
 
+use menu::MenuPlugin;
 use state::StatePlugin;
 use schedule::SchedulePlugin;
 use debug::DebugPlugin;
@@ -31,6 +38,7 @@ fn main() {
             DebugPlugin,
             // World defaults
             CameraPlugin,
+            MenuPlugin,
             HudPlugin,
             GizmoPlugin,
             FieldPlugin,

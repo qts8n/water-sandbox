@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::schedule::InGameSet;
+use crate::state::GameState;
 use crate::gravity::Gravity;
 use crate::fluid::FluidParticleStaticProperties;
 
@@ -50,7 +51,7 @@ impl Plugin for HudPlugin {
                     update_gravity_in_hud,
                 ),
             ).chain().in_set(InGameSet::EntityUpdates))
-            .add_systems(Startup, setup_hud);
+            .add_systems(OnExit(GameState::Menu), setup_hud);
     }
 }
 

@@ -3,6 +3,7 @@ use bevy::prelude::*;
 #[derive(States, Default, Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum GameState {
     #[default]
+    Menu,
     InGame,
     Paused,
     GameOver,

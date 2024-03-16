@@ -17,9 +17,8 @@ pub enum InGameSet {
 
 #[derive(SystemSet, Hash, PartialEq, Eq, Clone, Debug)]
 pub enum PhysicsSet {
-    PropertyUpdates,
     PositionUpdates,
-    CollisionDetection,
+    PropertyUpdates,
 }
 
 
@@ -39,11 +38,10 @@ impl Plugin for SchedulePlugin {
                 InGameSet::UserInput,
                 InGameSet::EntityUpdates,
             ).chain().run_if(in_state(GameState::InGame)))
-            .insert_resource(Time::<Fixed>::from_seconds(1. / 60.))
+            .insert_resource(Time::<Fixed>::from_seconds(1. / 120.))
             .configure_sets(FixedUpdate, (
-                PhysicsSet::PropertyUpdates,
                 PhysicsSet::PositionUpdates,
-                PhysicsSet::CollisionDetection,
+                PhysicsSet::PropertyUpdates,
             ).chain().run_if(in_state(GameState::InGame)))
             // Insert a flush point [#1]
             .add_systems(Update, apply_deferred.after(InGameSet::DespawnEntities).before(InGameSet::UserInput));

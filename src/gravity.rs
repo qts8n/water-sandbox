@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-const GRAVITY_FORCE: f32 = 10.;
+const GRAVITY_FORCE: f32 = 9.8;
 
 
 #[derive(Resource, Debug)]
