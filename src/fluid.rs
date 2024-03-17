@@ -4,6 +4,7 @@ use crate::smoothing;
 use crate::helpers;
 use crate::schedule::{InGameSet, PhysicsSet};
 use crate::state::GameState;
+use crate::camera::{WorldCursor, WorldCursorAction};
 use crate::fluid_container::FluidContainer;
 use crate::gravity::Gravity;
 
@@ -194,6 +195,7 @@ fn spawn_liquid(
 fn integrate_positions(
     mut query: Query<(Entity, &mut PredictedPosition, &mut Velocity, &mut Transform, &Acceleration), With<FluidParticle>>,
     mut grid: ResMut<FluidParticleGrid>,
+    cursor: Res<WorldCursor>,
     fluid_props: Res<FluidParticleStaticProperties>,
     container: Res<FluidContainer>,
     gravity: Res<Gravity>,
@@ -213,29 +215,44 @@ fn integrate_positions(
         mut transform,
         acceleration,
     ) in query.iter_mut() {
+        let translation_xy = transform.translation.xy();
+
+        let mut external_force_acceleration = Vec2::ZERO;
+        if cursor.action != WorldCursorAction::Idle {
+            let direction_to_cursor = cursor.position - translation_xy;
+            let distance_to_cursor = translation_xy.distance(cursor.position);
+            if distance_to_cursor < cursor.radius && distance_to_cursor > 0. {
+                external_force_acceleration = direction_to_cursor / distance_to_cursor * cursor.force * match cursor.action {
+                    WorldCursorAction::Inward => -1.,
+                    WorldCursorAction::Outward => 1.,
+                    WorldCursorAction::Idle => 0.,
+                };
+            }
+        }
+
         // Integrate positions using accumulated acceleration
-        velocity.value += (gravity.value + acceleration.value) / fluid_props.mass * time.delta_seconds();
+        velocity.value += (gravity.value + acceleration.value + external_force_acceleration) / fluid_props.mass * time.delta_seconds();
         transform.translation += velocity.value.extend(0.) * time.delta_seconds();
 
         // Handle collisions
-        if transform.translation.x < ext_min.x {
+        if translation_xy.x < ext_min.x {
             velocity.value.x *= -1. * fluid_props.collision_damping;
             transform.translation.x = ext_min.x;
-        } else if transform.translation.x > ext_max.x {
+        } else if translation_xy.x > ext_max.x {
             velocity.value.x *= -1. * fluid_props.collision_damping;
             transform.translation.x = ext_max.x;
         }
 
-        if transform.translation.y < ext_min.y {
+        if translation_xy.y < ext_min.y {
             velocity.value.y *= -1. * fluid_props.collision_damping;
             transform.translation.y = ext_min.y;
-        } else if transform.translation.y > ext_max.y {
+        } else if translation_xy.y > ext_max.y {
             velocity.value.y *= -1. * fluid_props.collision_damping;
             transform.translation.y = ext_max.y;
         }
 
         // Predict future position values
-        let position = transform.translation.xy() + velocity.value * PARTICLE_LOOKAHEAD_SCALAR;
+        let position = translation_xy + velocity.value * PARTICLE_LOOKAHEAD_SCALAR;
         predicted_position.value = position;
 
         // Assign particle position to the grid
@@ -346,9 +363,7 @@ fn update_color(
         // Color gradient depending on the velocity
         // HSL: 20 <= H <= 200, S = 100, L = 50
         let magnitude = velocity.value.length_squared();
-        if magnitude > PARTICLE_MAX_VELOCITY {
-            continue;
-        } else {
+        if magnitude < PARTICLE_MAX_VELOCITY {
             let h = (1. - magnitude / PARTICLE_MAX_VELOCITY) * 180. + 20.;
             material.color = Color::hsl(h, 1., 0.5);
         }
