@@ -9,14 +9,14 @@ use crate::gravity::Gravity;
 
 const N_SIZE: usize = 50;
 
-const PARTICLE_COLOR: Color = Color::rgb(0.16, 0.71, 0.97);
+const PARTICLE_MAX_VELOCITY: f32 = 40.;  // Used only in color gradient
 const PARTICLE_RADIUS: f32 = 0.05;
-const PARTICLE_COLLISION_DAMPING: f32 = 0.3;
+const PARTICLE_COLLISION_DAMPING: f32 = 0.95;
 const PARTICLE_MASS: f32 = 1.;
 const PARTICLE_SMOOTHING_RADIUS: f32 = 0.2;
 const PARTICLE_TARGET_DENSITY: f32 = 10.;
 const PARTICLE_PRESSURE_SCALAR: f32 = 30.;
-const PARTICLE_NEAR_PRESSURE_SCALAR: f32 = 2.;
+const PARTICLE_NEAR_PRESSURE_SCALAR: f32 = 1.;
 const PARTICLE_VISCOSITY_STRENGTH: f32 = 0.1;
 const PARTICLE_LOOKAHEAD_SCALAR: f32 = 1. / 60.;  // 60 Hz
 
@@ -106,9 +106,11 @@ impl Plugin for FluidPlugin {
             .init_resource::<FluidParticleStaticProperties>()
             .add_systems(OnExit(GameState::Menu), spawn_liquid)
             .add_systems(OnEnter(GameState::GameOver), spawn_liquid)
+            .add_systems(Update, update_color.in_set(InGameSet::EntityUpdates))
             .add_systems(Update, despawn_liquid.in_set(InGameSet::DespawnEntities))
             .add_systems(FixedUpdate, integrate_positions.in_set(PhysicsSet::PositionUpdates))
             .add_systems(FixedUpdate, (
+                // update_color,
                 update_density_and_pressure,
                 update_pressure_force,
             ).chain().in_set(PhysicsSet::PropertyUpdates));
@@ -124,7 +126,6 @@ fn spawn_liquid(
     // container: Res<FluidContainer>,
 ) {
     let shape = Mesh2dHandle(meshes.add(Circle { radius: fluid_props.radius }));
-    let material = materials.add(PARTICLE_COLOR);
     let points = helpers::cube_fluid(N_SIZE, N_SIZE, fluid_props.radius);
 
     // let (ext_min, ext_max) = container.get_extents();
@@ -134,8 +135,8 @@ fn spawn_liquid(
         FluidParticleBundle {
             mesh_bundle: MaterialMesh2dBundle {
                 mesh: shape.clone(),
-                material: material.clone(),
-                transform: Transform::from_xyz(point[0], point[1], 0.),
+                material: materials.add(Color::WHITE),
+                transform: Transform::from_xyz(point.x, point.y, 0.),
                 ..default()
             },
             ..default()
@@ -275,6 +276,25 @@ fn update_pressure_force(
         }
         acceleration.value = pressure_force / props.density + viscosity_force * fluid_props.viscosity_strength;
     });
+}
+
+
+fn update_color(
+    query: Query<(&Handle<ColorMaterial>, &Velocity), With<FluidParticle>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    for (material_handle, velocity) in query.iter() {
+        let Some(material) = materials.get_mut(material_handle) else { continue };
+        // Color gradient depending on the velocity
+        // HSL: 20 <= H <= 200, S = 100, L = 50
+        let magnitude = velocity.value.length_squared();
+        if magnitude > PARTICLE_MAX_VELOCITY {
+            continue;
+        } else {
+            let h = (1. - magnitude / PARTICLE_MAX_VELOCITY) * 180. + 20.;
+            material.color = Color::hsl(h, 1., 0.5);
+        }
+    }
 }
 
 
