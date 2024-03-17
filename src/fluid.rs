@@ -1,9 +1,10 @@
-use bevy::{prelude::*, sprite::{MaterialMesh2dBundle, Mesh2dHandle}};
+use bevy::{prelude::*, sprite::{MaterialMesh2dBundle, Mesh2dHandle}, utils::HashMap};
 
 use crate::smoothing;
 use crate::helpers;
 use crate::schedule::{InGameSet, PhysicsSet};
 use crate::state::GameState;
+use crate::camera::{WorldCursor, WorldCursorAction};
 use crate::fluid_container::FluidContainer;
 use crate::gravity::Gravity;
 
@@ -93,6 +94,50 @@ impl Default for FluidParticleStaticProperties {
 }
 
 
+#[derive(Resource, Default, Debug)]
+pub struct FluidParticleGrid {
+    pub map: HashMap<IVec2, Vec<Entity>>,
+}
+
+
+impl FluidParticleGrid {
+    pub fn neighbours(&self, position: &Vec2, radius: f32) -> Option<Vec<Entity>> {
+        let cell_key = (*position / radius).floor().as_ivec2();
+        let (i, j) = (cell_key.x, cell_key.y);
+
+        let Some(cell) = self.map.get(&cell_key) else {
+            return None;
+        };
+        let mut neighbour_iter = cell.clone();
+
+        for i_it in -1..2 {
+            let x_cell = i + i_it;
+            for j_it in -1..2 {
+                if i_it == 0 && j_it == 0 {
+                    continue;
+                }
+                let y_cell = j + j_it;
+                let cell_key = IVec2::new(x_cell, y_cell);
+                if let Some(entities) = self.map.get(&cell_key) {
+                    neighbour_iter.extend(entities);
+                }
+            }
+        }
+
+        Some(neighbour_iter)
+    }
+
+    pub fn add(&mut self, position: &Vec2, radius: f32, entity: Entity) {
+        let cell_key = (*position / radius).floor().as_ivec2();
+        self.map.entry(cell_key).or_insert_with(Vec::new).push(entity);
+    }
+
+    pub fn clear(&mut self) {
+        self.map.clear();
+    }
+}
+
+
 #[derive(Component, Debug)]
 pub struct FluidParticle;
 
@@ -104,13 +149,13 @@ impl Plugin for FluidPlugin {
     fn build(&self, app: &mut App) {
         app
             .init_resource::<FluidParticleStaticProperties>()
+            .init_resource::<FluidParticleGrid>()
             .add_systems(OnExit(GameState::Menu), spawn_liquid)
             .add_systems(OnEnter(GameState::GameOver), spawn_liquid)
             .add_systems(Update, update_color.in_set(InGameSet::EntityUpdates))
             .add_systems(Update, despawn_liquid.in_set(InGameSet::DespawnEntities))
             .add_systems(FixedUpdate, integrate_positions.in_set(PhysicsSet::PositionUpdates))
             .add_systems(FixedUpdate, (
-                // update_color,
                 update_density_and_pressure,
                 update_pressure_force,
             ).chain().in_set(PhysicsSet::PropertyUpdates));
@@ -148,47 +193,71 @@ fn spawn_liquid(
 
 
 fn integrate_positions(
-    mut query: Query<(&mut PredictedPosition, &mut Velocity, &mut Transform, &Acceleration), With<FluidParticle>>,
+    mut query: Query<(Entity, &mut PredictedPosition, &mut Velocity, &mut Transform, &Acceleration), With<FluidParticle>>,
+    mut grid: ResMut<FluidParticleGrid>,
+    cursor: Res<WorldCursor>,
     fluid_props: Res<FluidParticleStaticProperties>,
     container: Res<FluidContainer>,
     gravity: Res<Gravity>,
     time: Res<Time<Fixed>>,
 ) {
+    grid.clear();
+
     let (mut ext_min, mut ext_max) = container.get_extents();
     let rad_vec = Vec2::ONE * fluid_props.radius;
     ext_min += rad_vec;
     ext_max -= rad_vec;
 
-    query.par_iter_mut().for_each(|(
+    for (
+        particle,
         mut predicted_position,
         mut velocity,
         mut transform,
         acceleration,
-    )| {
+    ) in query.iter_mut() {
+        let translation_xy = transform.translation.xy();
+
+        let mut external_force_acceleration = Vec2::ZERO;
+        if cursor.action != WorldCursorAction::Idle {
+            let direction_to_cursor = cursor.position - translation_xy;
+            let distance_to_cursor = translation_xy.distance(cursor.position);
+            if distance_to_cursor < cursor.radius && distance_to_cursor > 0. {
+                external_force_acceleration = direction_to_cursor / distance_to_cursor * cursor.force * match cursor.action {
+                    WorldCursorAction::Inward => -1.,
+                    WorldCursorAction::Outward => 1.,
+                    WorldCursorAction::Idle => 0.,
+                };
+            }
+        }
+
         // Integrate positions using accumulated acceleration
-        velocity.value += (gravity.value + acceleration.value) / fluid_props.mass * time.delta_seconds();
+        velocity.value += (gravity.value + acceleration.value + external_force_acceleration) / fluid_props.mass * time.delta_seconds();
         transform.translation += velocity.value.extend(0.) * time.delta_seconds();
 
         // Handle collisions
-        if transform.translation.x < ext_min.x {
+        if translation_xy.x < ext_min.x {
             velocity.value.x *= -1. * fluid_props.collision_damping;
             transform.translation.x = ext_min.x;
-        } else if transform.translation.x > ext_max.x {
+        } else if translation_xy.x > ext_max.x {
             velocity.value.x *= -1. * fluid_props.collision_damping;
             transform.translation.x = ext_max.x;
         }
 
-        if transform.translation.y < ext_min.y {
+        if translation_xy.y < ext_min.y {
             velocity.value.y *= -1. * fluid_props.collision_damping;
             transform.translation.y = ext_min.y;
-        } else if transform.translation.y > ext_max.y {
+        } else if translation_xy.y > ext_max.y {
             velocity.value.y *= -1. * fluid_props.collision_damping;
             transform.translation.y = ext_max.y;
         }
 
         // Predict future position values
-        predicted_position.value = transform.translation.xy() + velocity.value * PARTICLE_LOOKAHEAD_SCALAR;
-    });
+        let position = translation_xy + velocity.value * PARTICLE_LOOKAHEAD_SCALAR;
+        predicted_position.value = position;
+
+        // Assign particle position to the grid
+        grid.add(&position, fluid_props.smoothing_radius, particle);
+    }
 }
 
 
@@ -196,13 +265,16 @@ fn update_density_and_pressure(
     mut query: Query<(&mut FluidParticleProperties, &PredictedPosition), With<FluidParticle>>,
     neighbor_query: Query<&PredictedPosition, With<FluidParticle>>,
     fluid_props: Res<FluidParticleStaticProperties>,
+    grid: Res<FluidParticleGrid>,
 ) {
     query.par_iter_mut().for_each(|(mut props, position)| {
+        let Some(neighbours) = grid.neighbours(&position.value, fluid_props.smoothing_radius) else { return };
+
         let mut new_density = 0.;
         let mut new_near_density = 0.;
 
         // Accumulate density amongst neighbours
-        for neighbor_position in neighbor_query.iter() {
+        for neighbor_position in neighbor_query.iter_many(neighbours) {
             let distance = position.value.distance(neighbor_position.value);
             if distance > fluid_props.smoothing_radius {
                 continue;
@@ -226,6 +298,7 @@ fn update_pressure_force(
     mut query: Query<(Entity, &mut Acceleration, &Velocity, &FluidParticleProperties, &PredictedPosition), With<FluidParticle>>,
     neighbor_query: Query<(Entity, &Velocity, &FluidParticleProperties, &PredictedPosition), With<FluidParticle>>,
     fluid_props: Res<FluidParticleStaticProperties>,
+    grid: Res<FluidParticleGrid>,
 ) {
     query.par_iter_mut().for_each(|(
         particle,
@@ -234,6 +307,8 @@ fn update_pressure_force(
         props,
         position,
     )| {
+        let Some(neighbours) = grid.neighbours(&position.value, fluid_props.smoothing_radius) else { return };
+
         let mut pressure_force = Vec2::ZERO;
         let mut viscosity_force = Vec2::ZERO;
 
@@ -242,7 +317,7 @@ fn update_pressure_force(
             neighbor_velocity,
             neighbor_props,
             neighbor_position,
-        ) in neighbor_query.iter() {
+        ) in neighbor_query.iter_many(neighbours) {
             if particle == neighbor {
                 continue;
             }
@@ -288,9 +363,7 @@ fn update_color(
         // Color gradient depending on the velocity
         // HSL: 20 <= H <= 200, S = 100, L = 50
         let magnitude = velocity.value.length_squared();
-        if magnitude > PARTICLE_MAX_VELOCITY {
-            continue;
-        } else {
+        if magnitude < PARTICLE_MAX_VELOCITY {
             let h = (1. - magnitude / PARTICLE_MAX_VELOCITY) * 180. + 20.;
             material.color = Color::hsl(h, 1., 0.5);
         }
