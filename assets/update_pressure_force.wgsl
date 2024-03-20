@@ -9,7 +9,7 @@ struct FluidProps {
     pressure_scalar: f32,
     near_pressure_scalar: f32,
     viscosity_strength: f32,
-};
+}
 
 struct FluidParticle {
     position: vec2<f32>,
@@ -18,7 +18,7 @@ struct FluidParticle {
     velocity: vec2<f32>,
     acceleration: vec2<f32>,
     predicted_position: vec2<f32>,
-};
+}
 
 const PI: f32 = 3.1415926;
 
@@ -48,7 +48,7 @@ fn smoothing_kernel_viscosity(radius: f32, dst: f32) -> f32 {
 fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Check workgroup boundary
     let index = invocation_id.x;
-    if (index >= fluid_props.num_particles) {
+    if index >= fluid_props.num_particles {
         return;
     }
 
@@ -69,10 +69,10 @@ fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         // Find direction of the force
         var dir = neighbour.predicted_position - particles[index].predicted_position;
         let dst = distance(neighbour.predicted_position, particles[index].predicted_position);
-        if (dst > fluid_props.smoothing_radius) {
+        if dst > fluid_props.smoothing_radius {
             continue;
         }
-        if (dst > 0.) {
+        if dst > 0. {
             dir /= dst;
         } else {
             dir = vec2(0., 1.);
