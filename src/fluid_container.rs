@@ -1,8 +1,11 @@
 use bevy::prelude::*;
+use bevy::core::Pod;
+use bevy_app_compute::prelude::*;
+use bytemuck::Zeroable;
 
 use crate::schedule::InGameSet;
 
-const FLUID_CONTAINER_SIZE: Vec2 = Vec2::new(16., 9.);
+const FLUID_CONTAINER_SIZE: Vec2 = Vec2::new(32., 18.);
 const FLUID_CONTAINER_POSITION: Vec2 = Vec2::ZERO;
 
 
@@ -10,21 +13,11 @@ const FLUID_CONTAINER_POSITION: Vec2 = Vec2::ZERO;
 pub struct FluidContainerGizmo;
 
 
-#[derive(Resource, Debug)]
+#[derive(Resource, ShaderType, Pod, Zeroable, Clone, Copy)]
+#[repr(C)]
 pub struct FluidContainer {
     pub position: Vec2,
     pub size: Vec2,
-}
-
-
-impl FluidContainer {
-    pub fn get_extents(&self) -> (Vec2, Vec2) {
-        let half_size = self.size / 2.;
-        (
-            Vec2::new(self.position.x - half_size.x, self.position.y - half_size.y),
-            Vec2::new(self.position.x + half_size.x, self.position.y + half_size.y),
-        )
-    }
 }
 
 

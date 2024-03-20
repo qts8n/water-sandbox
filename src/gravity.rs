@@ -1,9 +1,13 @@
 use bevy::prelude::*;
+use bevy::core::Pod;
+use bevy_app_compute::prelude::*;
+use bytemuck::Zeroable;
 
 const GRAVITY_FORCE: f32 = 9.8;
 
 
-#[derive(Resource, Debug)]
+#[derive(Resource, ShaderType, Pod, Zeroable, Clone, Copy)]
+#[repr(C)]
 pub struct Gravity {
     pub value: Vec2,
 }

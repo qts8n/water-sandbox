@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::schedule::InGameSet;
 use crate::state::GameState;
 use crate::gravity::Gravity;
-use crate::fluid::FluidParticleStaticProperties;
+use crate::fluid_compute::FluidStaticProps;
 
 const TEXT_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
 const TEXT_FONT_SIZE: f32 = 20.;
@@ -128,7 +128,7 @@ fn setup_hud(mut commands: Commands) {
 
 
 fn update_fluid_props(
-    mut fluid_props: ResMut<FluidParticleStaticProperties>,
+    mut fluid_props: ResMut<FluidStaticProps>,
     mut gravity: ResMut<Gravity>,
     keyboard_input: Res<ButtonInput<KeyCode>>
 ) {
@@ -165,7 +165,7 @@ fn update_fluid_props(
 }
 
 
-fn update_pressure_in_hud(mut query: Query<&mut Text, With<PressureHudItem>>, fluid_props: Res<FluidParticleStaticProperties>) {
+fn update_pressure_in_hud(mut query: Query<&mut Text, With<PressureHudItem>>, fluid_props: Res<FluidStaticProps>) {
     let Ok(mut pressure_hud_item) = query.get_single_mut() else { return };
     if pressure_hud_item.sections.is_empty() {
         return;
@@ -174,7 +174,7 @@ fn update_pressure_in_hud(mut query: Query<&mut Text, With<PressureHudItem>>, fl
 }
 
 
-fn update_near_pressure_in_hud(mut query: Query<&mut Text, With<NearPressureHudItem>>, fluid_props: Res<FluidParticleStaticProperties>) {
+fn update_near_pressure_in_hud(mut query: Query<&mut Text, With<NearPressureHudItem>>, fluid_props: Res<FluidStaticProps>) {
     let Ok(mut near_pressure_hud_item) = query.get_single_mut() else { return };
     if near_pressure_hud_item.sections.is_empty() {
         return;
@@ -183,7 +183,7 @@ fn update_near_pressure_in_hud(mut query: Query<&mut Text, With<NearPressureHudI
 }
 
 
-fn update_target_density_in_hud(mut query: Query<&mut Text, With<TargetDensityHudItem>>, fluid_props: Res<FluidParticleStaticProperties>) {
+fn update_target_density_in_hud(mut query: Query<&mut Text, With<TargetDensityHudItem>>, fluid_props: Res<FluidStaticProps>) {
     let Ok(mut target_density_hud_item) = query.get_single_mut() else { return };
     if target_density_hud_item.sections.is_empty() {
         return;
@@ -192,7 +192,7 @@ fn update_target_density_in_hud(mut query: Query<&mut Text, With<TargetDensityHu
 }
 
 
-fn update_viscosity_in_hud(mut query: Query<&mut Text, With<ViscosityHudItem>>, fluid_props: Res<FluidParticleStaticProperties>) {
+fn update_viscosity_in_hud(mut query: Query<&mut Text, With<ViscosityHudItem>>, fluid_props: Res<FluidStaticProps>) {
     let Ok(mut viscosity_hud_item) = query.get_single_mut() else { return };
     if viscosity_hud_item.sections.is_empty() {
         return;
@@ -201,7 +201,7 @@ fn update_viscosity_in_hud(mut query: Query<&mut Text, With<ViscosityHudItem>>, 
 }
 
 
-fn update_smoothing_radius_in_hud(mut query: Query<&mut Text, With<SmoothingRadiusHudItem>>, fluid_props: Res<FluidParticleStaticProperties>) {
+fn update_smoothing_radius_in_hud(mut query: Query<&mut Text, With<SmoothingRadiusHudItem>>, fluid_props: Res<FluidStaticProps>) {
     let Ok(mut smoothing_radius_hud_item) = query.get_single_mut() else { return };
     if smoothing_radius_hud_item.sections.is_empty() {
         return;
