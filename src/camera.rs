@@ -1,6 +1,9 @@
 use bevy::prelude::*;
+use bevy::core::Pod;
 use bevy::render::camera::ScalingMode;
 use bevy::window::PrimaryWindow;
+use bevy_app_compute::prelude::*;
+use bytemuck::Zeroable;
 
 use crate::fluid_container::FluidContainer;
 use crate::schedule::InGameSet;
@@ -11,21 +14,12 @@ const CURSOR_RADIUS: f32 = 2.;
 const CURSOR_FORCE: f32 = 20.;
 
 
-#[derive(PartialEq, Default, Debug)]
-pub enum WorldCursorAction {
-    #[default]
-    Idle,
-    Inward,
-    Outward,
-}
-
-
-#[derive(Resource, Debug)]
+#[derive(Resource, ShaderType, Pod, Zeroable, Clone, Copy)]
+#[repr(C)]
 pub struct WorldCursor {
     pub position: Vec2,
     pub radius: f32,
     pub force: f32,
-    pub action: WorldCursorAction,
 }
 
 
@@ -33,10 +27,24 @@ impl Default for WorldCursor {
     fn default() -> Self {
         Self {
             radius: CURSOR_RADIUS,
-            force: CURSOR_FORCE,
+            force: 0.,
             position: Vec2::default(),
-            action: WorldCursorAction::default(),
         }
+    }
+}
+
+
+impl WorldCursor {
+    pub fn set_idle(&mut self) {
+        self.force = 0.;
+    }
+
+    pub fn set_inward(&mut self) {
+        self.force = CURSOR_FORCE;
+    }
+
+    pub fn set_outward(&mut self) {
+        self.force = -CURSOR_FORCE;
     }
 }
 
@@ -92,7 +100,7 @@ fn update_cursor(
     camera_query: Query<(&Camera, &GlobalTransform), With<Observer>>,
     mouse_input: Res<ButtonInput<MouseButton>>,
 ) {
-    cursor_position.action = WorldCursorAction::Idle;
+    cursor_position.set_idle();
 
     let Ok((camera, transform)) = camera_query.get_single() else { return };
     let Ok(window) = window_query.get_single() else { return };
@@ -102,14 +110,13 @@ fn update_cursor(
         .map(|ray| ray.origin.truncate())
     {
         cursor_position.position = world_position;
-        // eprintln!("World coords: {}/{}", world_position.x, world_position.y);
     } else {
         return;
     }
 
     if mouse_input.pressed(MouseButton::Left) {
-        cursor_position.action = WorldCursorAction::Inward;
+        cursor_position.set_inward();
     } else if mouse_input.pressed(MouseButton::Right) {
-        cursor_position.action = WorldCursorAction::Outward;
+        cursor_position.set_outward();
     }
 }

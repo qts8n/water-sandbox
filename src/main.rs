@@ -1,8 +1,4 @@
-// Misc.
-mod smoothing;
 mod helpers;
-
-// App
 mod state;
 mod schedule;
 mod debug;
@@ -12,7 +8,7 @@ mod hud;
 mod fluid_container;
 mod field;
 mod gravity;
-mod fluid;
+mod fluid_compute;
 
 use bevy::prelude::*;
 
@@ -25,7 +21,7 @@ use hud::HudPlugin;
 use fluid_container::GizmoPlugin;
 use field::FieldPlugin;
 use gravity::GravityPlugin;
-use fluid::FluidPlugin;
+use fluid_compute::FluidPlugin;
 
 
 fn main() {
