@@ -24,6 +24,9 @@ const PI: f32 = 3.1415926;
 
 @group(0) @binding(0) var<uniform> fluid_props: FluidProps;
 @group(0) @binding(1) var<storage, read_write> particles: array<FluidParticle>;
+// @group(0) @binding(2) var<storage> particle_indicies: array<u32>;
+// @group(0) @binding(3) var<storage> particle_cell_indicies: array<u32>;
+// @group(0) @binding(4) var<storage> cell_offsets: array<u32>;
 
 // Slope calculation
 
@@ -44,7 +47,7 @@ fn smoothing_kernel_viscosity(radius: f32, dst: f32) -> f32 {
     return v * v * v * volume;
 }
 
-@compute @workgroup_size(1024, 1, 1)
+@compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Check workgroup boundary
     let index = invocation_id.x;
@@ -59,7 +62,7 @@ fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Accumulate pressure force
     var pressure_force = vec2(0.);
     var viscosity_force = vec2(0.);
-    for (var i: u32 = 0; i < fluid_props.num_particles; i++) {
+    for (var i = 0u; i < fluid_props.num_particles; i++) {
         if i == index {
             continue;
         }

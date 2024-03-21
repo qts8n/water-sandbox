@@ -25,6 +25,10 @@ const DENSITY_PADDING: f32 = 0.00001;
 
 @group(0) @binding(0) var<uniform> fluid_props: FluidProps;
 @group(0) @binding(1) var<storage, read_write> particles: array<FluidParticle>;
+// @group(0) @binding(2) var<storage> particle_indicies: array<u32>;
+// @group(0) @binding(3) var<storage> particle_cell_indicies: array<u32>;
+// @group(0) @binding(4) var<storage> cell_offsets: array<u32>;
+
 
 fn smoothing_kernel(radius: f32, dst: f32) -> f32 {
     let volume = 6. / (PI * pow(radius, 4.));
@@ -38,7 +42,7 @@ fn smoothing_kernel_near(radius: f32, dst: f32) -> f32 {
     return v * v * v * volume;
 }
 
-@compute @workgroup_size(1024, 1, 1)
+@compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Check workgroup boundary
     let index = invocation_id.x;

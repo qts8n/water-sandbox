@@ -43,7 +43,7 @@ const LOOKAHEAD_FACTOR: f32 = 1. / 120.;
 @group(0) @binding(3) var<uniform> gravity: Gravity;
 @group(0) @binding(4) var<storage, read_write> particles: array<FluidParticle>;
 
-@compute @workgroup_size(1024, 1, 1)
+@compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Check workgroup boundary
     let index = invocation_id.x;
