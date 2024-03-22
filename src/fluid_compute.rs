@@ -13,7 +13,7 @@ use crate::camera::WorldCursor;
 use crate::fluid_container::FluidContainer;
 use crate::gravity::Gravity;
 
-const N_SIZE: usize = 100;
+const N_SIZE: usize = 64;  // FIXME: only works with powers of 2 now
 const WORKGROUP_SIZE: u32 = 256;
 
 // const PARTICLE_MAX_VELOCITY: f32 = 40.;  // Used only in color gradient
@@ -258,16 +258,16 @@ impl ComputeWorker for FluidWorker {
             .add_pass::<UpdateDensityShader>([batch_size, 1, 1], &[
                 "fluid_props",
                 "particles",
-                // "particle_indicies",
-                // "particle_cell_indicies",
-                // "cell_offsets",
+                "particle_indicies",
+                "particle_cell_indicies",
+                "cell_offsets",
             ])
             .add_pass::<UpdatePressureForceShader>([batch_size, 1, 1], &[
                 "fluid_props",
                 "particles",
-                // "particle_indicies",
-                // "particle_cell_indicies",
-                // "cell_offsets",
+                "particle_indicies",
+                "particle_cell_indicies",
+                "cell_offsets",
             ])
             .add_pass::<IntegrateShader>([batch_size, 1, 1], &[
                 "fluid_props",

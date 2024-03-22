@@ -20,8 +20,9 @@ struct FluidParticle {
     predicted_position: vec2<f32>,
 }
 
-const P1 = 15823u;  // Some large primes
-const P2 = 9737333u;
+const INF: u32 = 99999999;
+const P1: u32 = 15823;  // Some large primes
+const P2: u32 = 9737333;
 
 @group(0) @binding(0) var<uniform> fluid_props: FluidProps;
 @group(0) @binding(1) var<storage> particles: array<FluidParticle>;
@@ -46,7 +47,7 @@ fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         return;
     }
 
-    cell_offsets[index] = 99999999u;
+    cell_offsets[index] = INF;
     let particle_index = particle_indicies[index];
-    particle_cell_indicies[particle_index] = hash_cell(get_cell(particles[index].position));
+    particle_cell_indicies[particle_index] = hash_cell(get_cell(particles[particle_index].predicted_position));
 }
