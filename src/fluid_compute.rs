@@ -109,7 +109,11 @@ struct IntegrateShader;
 
 impl ComputeShader for IntegrateShader {
     fn shader() -> ShaderRef {
-        "integrate.wgsl".into()
+        "simulation.wgsl".into()
+    }
+
+    fn entry_point<'a>() -> &'a str {
+        "integrate"
     }
 }
 
@@ -120,7 +124,11 @@ struct UpdateDensityShader;
 
 impl ComputeShader for UpdateDensityShader {
     fn shader() -> ShaderRef {
-        "update_density.wgsl".into()
+        "simulation.wgsl".into()
+    }
+
+    fn entry_point<'a>() -> &'a str {
+        "update_density"
     }
 }
 
@@ -131,7 +139,11 @@ struct UpdatePressureForceShader;
 
 impl ComputeShader for UpdatePressureForceShader {
     fn shader() -> ShaderRef {
-        "update_pressure_force.wgsl".into()
+        "simulation.wgsl".into()
+    }
+
+    fn entry_point<'a>() -> &'a str {
+        "update_pressure_force"
     }
 }
 
@@ -141,7 +153,11 @@ struct HashParticlesShader;
 
 impl ComputeShader for HashParticlesShader {
     fn shader() -> ShaderRef {
-        "hash_particles.wgsl".into()
+        "simulation.wgsl".into()
+    }
+
+    fn entry_point<'a>() -> &'a str {
+        "hash_particles"
     }
 }
 
@@ -153,6 +169,10 @@ impl ComputeShader for BitonicSortShader {
     fn shader() -> ShaderRef {
         "bitonic_sort.wgsl".into()
     }
+
+    fn entry_point<'a>() -> &'a str {
+        "bitonic_sort"
+    }
 }
 
 
@@ -162,7 +182,11 @@ struct CalculateCellOffsetsShader;
 
 impl ComputeShader for CalculateCellOffsetsShader {
     fn shader() -> ShaderRef {
-        "calculate_cell_offsets.wgsl".into()
+        "bitonic_sort.wgsl".into()
+    }
+
+    fn entry_point<'a>() -> &'a str {
+        "calculate_cell_offsets"
     }
 }
 
@@ -211,6 +235,7 @@ impl ComputeWorker for FluidWorker {
 
         let mut builder = AppComputeWorkerBuilder::new(world);
         builder
+            .add_uniform("num_particles", &num_particles)
             .add_uniform("fluid_props", &static_fluid_props)
             .add_uniform("world_cursor", &world_cursor)
             .add_uniform("fluid_container", &container)
@@ -237,10 +262,10 @@ impl ComputeWorker for FluidWorker {
                 builder
                     .add_uniform(&uniform_name, &BitSorter::new(block, dim))
                     .add_pass::<BitonicSortShader>([batch_size, 1, 1], &[
-                        "fluid_props",
-                        &uniform_name,
+                        "num_particles",
                         "particle_indicies",
                         "particle_cell_indicies",
+                        &uniform_name,
                     ]);
                 block >>= 1;
                 uniform_id += 1;
@@ -250,7 +275,7 @@ impl ComputeWorker for FluidWorker {
 
         builder
             .add_pass::<CalculateCellOffsetsShader>([batch_size, 1, 1], &[
-                "fluid_props",
+                "num_particles",
                 "particle_indicies",
                 "particle_cell_indicies",
                 "cell_offsets",
@@ -271,10 +296,10 @@ impl ComputeWorker for FluidWorker {
             ])
             .add_pass::<IntegrateShader>([batch_size, 1, 1], &[
                 "fluid_props",
+                "particles",
                 "world_cursor",
                 "fluid_container",
                 "gravity",
-                "particles",
             ])
             .build()
     }
