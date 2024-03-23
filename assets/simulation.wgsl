@@ -1,4 +1,4 @@
-const WORKGROUP_SIZE: u32 = 256;
+const WORKGROUP_SIZE: u32 = 32;
 
 const LOOKAHEAD_FACTOR: f32 = 1. / 60.;
 const DENSITY_PADDING: f32 = 0.00001;

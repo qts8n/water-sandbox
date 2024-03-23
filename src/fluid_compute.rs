@@ -14,10 +14,10 @@ use crate::fluid_container::FluidContainer;
 use crate::gravity::Gravity;
 
 const N_SIZE: usize = 64;  // FIXME: only works with powers of 2 now
-const WORKGROUP_SIZE: u32 = 256;
+const WORKGROUP_SIZE: u32 = 32;
 
 // const PARTICLE_MAX_VELOCITY: f32 = 40.;  // Used only in color gradient
-const PARTICLE_RADIUS: f32 = 0.07;
+const PARTICLE_RADIUS: f32 = 0.05;
 const PARTICLE_COLLISION_DAMPING: f32 = 0.95;
 const PARTICLE_MASS: f32 = 1.;
 const PARTICLE_SMOOTHING_RADIUS: f32 = 0.35;
@@ -99,7 +99,19 @@ pub struct BitSorter {
 
 
 impl BitSorter {
-    fn new(block: u32, dim: u32) -> Self { Self { block, dim } }
+    fn new(block: u32, dim: u32) -> Self {
+        Self {
+            block,
+            dim,
+        }
+    }
+}
+
+
+struct BitSorterStage {
+    bit_sorter: BitSorter,
+    workgroups: [u32; 3],
+    uniform_name: String,
 }
 
 
@@ -208,6 +220,37 @@ impl FluidWorker {
         }
         return (initial_data, initial_indicies);
     }
+
+    fn get_bit_sorter_stages(data_length: u32, batch_size: u32) -> Vec<BitSorterStage> {
+        // fn next_power_of_two(num: u32) -> u32 {
+        //     let mut v = num - 1;
+        //     v |= v >> 1;
+        //     v |= v >> 2;
+        //     v |= v >> 4;
+        //     v |= v >> 8;
+        //     v |= v >> 16;
+        //     v + 1
+        // }
+
+        // let input_length = next_power_of_two(data_length);
+        let mut uniform_id = 1;
+        let mut dim = 2;
+        let mut block_stages = Vec::new();
+        while dim <= data_length {
+            let mut block = dim >> 1;
+            while block > 0 {
+                block_stages.push(BitSorterStage {
+                    bit_sorter: BitSorter::new(block, dim),
+                    workgroups: [batch_size, 1, 1],
+                    uniform_name: format!("bit_sorter_{}", uniform_id),
+                });
+                block >>= 1;
+                uniform_id += 1;
+            }
+            dim <<= 1;
+        }
+        return block_stages;
+    }
 }
 
 
@@ -233,6 +276,9 @@ impl ComputeWorker for FluidWorker {
         let gravity = world.resource::<Gravity>().clone();
         let container = world.resource::<FluidContainer>().clone();
 
+        // Init bit sorter stages
+        let bit_sorter_stages = Self::get_bit_sorter_stages(num_particles, batch_size);
+
         let mut builder = AppComputeWorkerBuilder::new(world);
         builder
             .add_uniform("num_particles", &num_particles)
@@ -241,9 +287,9 @@ impl ComputeWorker for FluidWorker {
             .add_uniform("fluid_container", &container)
             .add_uniform("gravity", &gravity)
             .add_staging("particles", &initial_data)
-            .add_staging("particle_indicies", &initial_indicies)
-            .add_staging("particle_cell_indicies", &initial_indicies)
-            .add_staging("cell_offsets", &initial_indicies)
+            .add_rw_storage("particle_indicies", &initial_indicies)
+            .add_rw_storage("particle_cell_indicies", &initial_indicies)
+            .add_rw_storage("cell_offsets", &initial_indicies)
             .add_pass::<HashParticlesShader>([batch_size, 1, 1], &[
                 "fluid_props",
                 "particles",
@@ -253,24 +299,15 @@ impl ComputeWorker for FluidWorker {
             ]);
 
         // Bitonic sort passes
-        let mut uniform_id = 1;
-        let mut dim = 2;
-        while dim <= num_particles {
-            let mut block = dim >> 1;
-            while block > 0 {
-                let uniform_name = format!("bit_sorter_{}", uniform_id);
-                builder
-                    .add_uniform(&uniform_name, &BitSorter::new(block, dim))
-                    .add_pass::<BitonicSortShader>([batch_size, 1, 1], &[
-                        "num_particles",
-                        "particle_indicies",
-                        "particle_cell_indicies",
-                        &uniform_name,
-                    ]);
-                block >>= 1;
-                uniform_id += 1;
-            }
-            dim <<= 1;
+        println!("Bit sort passes: {}", bit_sorter_stages.len());
+        for stage in bit_sorter_stages {
+            builder.add_uniform(&stage.uniform_name, &stage.bit_sorter)
+                .add_pass::<BitonicSortShader>(stage.workgroups, &[
+                    "num_particles",
+                    "particle_indicies",
+                    "particle_cell_indicies",
+                    &stage.uniform_name,
+                ]);
         }
 
         builder
