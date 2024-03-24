@@ -16,7 +16,6 @@ use crate::gravity::Gravity;
 const N_SIZE: usize = 128;  // FIXME: only works with powers of 2 now
 const WORKGROUP_SIZE: u32 = 32;
 
-// const PARTICLE_MAX_VELOCITY: f32 = 40.;  // Used only in color gradient
 const PARTICLE_RADIUS: f32 = 0.05;
 const PARTICLE_COLLISION_DAMPING: f32 = 0.95;
 const PARTICLE_MASS: f32 = 1.;
@@ -385,6 +384,10 @@ impl Plugin for FluidComputePlugin {
 struct FluidParticleLabel(usize);
 
 
+#[derive(Component, Debug)]
+struct Velocity(Vec2);
+
+
 pub struct FluidPlugin;
 
 
@@ -407,16 +410,18 @@ fn setup(
     fluid_initials: Res<FluidParticlesInitial>,
 ) {
     let shape = Mesh2dHandle(meshes.add(Circle { radius: fluid_props.radius }));
+    let material = materials.add(Color::CYAN);
     let mut particle_bundles = Vec::new();
     let mut particle_id: usize = 0;
     for point in &fluid_initials.positions {
         particle_bundles.push((
             MaterialMesh2dBundle {
                 mesh: shape.clone(),
-                material: materials.add(Color::WHITE),
+                material: material.clone(),
                 transform: Transform::from_xyz(point.x, point.y, 0.),
                 ..default()
             },
+            Velocity(Vec2::ZERO),
             FluidParticleLabel(particle_id),
         ));
         particle_id += 1;
@@ -426,14 +431,12 @@ fn setup(
 
 
 fn update(
-    mut query: Query<(&mut Transform, &FluidParticleLabel)>,
+    mut query: Query<(&mut Transform, &mut Velocity, &FluidParticleLabel)>,
     mut worker: ResMut<AppComputeWorker<FluidWorker>>,
     fluid_props: Res<FluidStaticProps>,
     world_cursor: Res<WorldCursor>,
     fluid_container: Res<FluidContainer>,
     gravity: Res<Gravity>,
-    // color_query: Query<(&Handle<ColorMaterial>, &FluidParticleLabel)>,
-    // mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     if !worker.ready() {
         return;
@@ -445,22 +448,28 @@ fn update(
     let Ok(()) = worker.try_write("fluid_container", fluid_container.as_ref()) else { return };
     let Ok(()) = worker.try_write("gravity", gravity.as_ref()) else { return };
 
-    query.par_iter_mut().for_each(|(mut transform, particle)| {
-        transform.translation = particles[particle.0].position.extend(0.);
+    query.par_iter_mut().for_each(|(mut transform, mut velocity, particle)| {
+        let p = particles[particle.0];
+        transform.translation = p.position.extend(0.);
+        velocity.0 = p.velocity;
     });
-
-    // Update color
-    // Color gradient depending on the velocity
-    // HSL: 20 <= H <= 200, S = 100, L = 50
-    // for (material_handle, particle) in color_query.iter() {
-    //     let Some(material) = materials.get_mut(material_handle) else { continue };
-    //     let magnitude = particles[particle.0].velocity.length_squared();
-    //     if magnitude < PARTICLE_MAX_VELOCITY {
-    //         let h = (1. - magnitude / PARTICLE_MAX_VELOCITY) * 180. + 20.;
-    //         material.color = Color::hsl(h, 1., 0.5);
-    //     }
-    // }
 }
+
+
+// fn update_color(
+//     color_query: Query<(&Handle<ColorMaterial>, &Velocity), With<FluidParticleLabel>>,
+//     mut materials: ResMut<Assets<ColorMaterial>>,
+// ) {
+//     // Color gradient depending on the velocity HSL: 20 <= H <= 200, S = 100, L = 50
+//     for (material_handle, velocity) in color_query.iter() {
+//         let Some(material) = materials.get_mut(material_handle) else { continue };
+//         let magnitude = velocity.0.length_squared();
+//         if magnitude < 40. {
+//             let h = (1. - magnitude / 40.) * 180. + 20.;
+//             material.color = Color::hsl(h, 1., 0.5);
+//         }
+//     }
+// }
 
 
 fn despawn_liquid(
