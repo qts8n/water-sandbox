@@ -1,4 +1,4 @@
-const WORKGROUP_SIZE: u32 = 32;
+const WORKGROUP_SIZE: u32 = 1024;
 
 struct BitSorter {
     block_size: u32,
