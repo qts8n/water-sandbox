@@ -1,6 +1,6 @@
 const WORKGROUP_SIZE: u32 = 32;
 
-const LOOKAHEAD_FACTOR: f32 = 1. / 60.;
+const LOOKAHEAD_FACTOR: f32 = 1. / 50.;
 const DENSITY_PADDING: f32 = 0.00001;
 
 const PI: f32 = 3.141592653589793238;  // Math constants

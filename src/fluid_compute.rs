@@ -13,7 +13,7 @@ use crate::camera::WorldCursor;
 use crate::fluid_container::FluidContainer;
 use crate::gravity::Gravity;
 
-const N_SIZE: usize = 64;  // FIXME: only works with powers of 2 now
+const N_SIZE: usize = 128;  // FIXME: only works with powers of 2 now
 const WORKGROUP_SIZE: u32 = 32;
 
 // const PARTICLE_MAX_VELOCITY: f32 = 40.;  // Used only in color gradient
@@ -25,7 +25,7 @@ const PARTICLE_TARGET_DENSITY: f32 = 10.;
 const PARTICLE_PRESSURE_SCALAR: f32 = 55.;
 const PARTICLE_NEAR_PRESSURE_SCALAR: f32 = 2.;
 const PARTICLE_VISCOSITY_STRENGTH: f32 = 0.5;
-const PARTICLE_LOOKAHEAD_SCALAR: f32 = 1. / 120.;
+const PARTICLE_LOOKAHEAD_SCALAR: f32 = 1. / 60.;
 
 
 #[derive(Resource, ShaderType, Pod, Zeroable, Clone, Copy)]
@@ -222,21 +222,14 @@ impl FluidWorker {
     }
 
     fn get_bit_sorter_stages(data_length: u32, batch_size: u32) -> Vec<BitSorterStage> {
-        // fn next_power_of_two(num: u32) -> u32 {
-        //     let mut v = num - 1;
-        //     v |= v >> 1;
-        //     v |= v >> 2;
-        //     v |= v >> 4;
-        //     v |= v >> 8;
-        //     v |= v >> 16;
-        //     v + 1
-        // }
-
-        // let input_length = next_power_of_two(data_length);
+        let input_length = match data_length.checked_next_power_of_two() {
+            Some(pot) => pot,
+            None => data_length,
+        };
         let mut uniform_id = 1;
         let mut dim = 2;
         let mut block_stages = Vec::new();
-        while dim <= data_length {
+        while dim <= input_length {
             let mut block = dim >> 1;
             while block > 0 {
                 block_stages.push(BitSorterStage {
@@ -256,10 +249,8 @@ impl FluidWorker {
 
 impl ComputeWorker for FluidWorker {
     fn build(world: &mut World) -> AppComputeWorker<Self> {
-        // TODO: extract resources without panic
-
         // Init static props
-        let mut fluid_props = world.resource_mut::<FluidStaticProps>();
+        let mut fluid_props = world.get_resource_or_insert_with(FluidStaticProps::default);
         let points = cube_fluid(N_SIZE, N_SIZE, fluid_props.radius);
         let num_particles = points.len() as u32;
         fluid_props.num_particles = num_particles;
@@ -267,14 +258,14 @@ impl ComputeWorker for FluidWorker {
         let static_fluid_props = fluid_props.clone();
 
         // Init positions
-        let mut fluid_initials = world.resource_mut::<FluidParticlesInitial>();
+        let mut fluid_initials = world.get_resource_or_insert_with(FluidParticlesInitial::default);
         fluid_initials.positions = points.clone();
         let (initial_data, initial_indicies) = Self::create_initial_data_buffer(&points);
 
         // Get static shader resources
-        let world_cursor = world.resource::<WorldCursor>().clone();
-        let gravity = world.resource::<Gravity>().clone();
-        let container = world.resource::<FluidContainer>().clone();
+        let world_cursor = world.get_resource_or_insert_with(WorldCursor::default).clone();
+        let gravity = world.get_resource_or_insert_with(Gravity::default).clone();
+        let container = world.get_resource_or_insert_with(FluidContainer::default).clone();
 
         // Init bit sorter stages
         let bit_sorter_stages = Self::get_bit_sorter_stages(num_particles, batch_size);
@@ -367,11 +358,11 @@ impl<W: ComputeWorker> Plugin for FluidComputeWorkerPlugin<W> {
 
         app
             .insert_resource(worker)
-            .add_systems(FixedUpdate, AppComputeWorker::<W>::extract_pipelines.in_set(ShaderPhysicsSet::Prepare))
-            .add_systems(FixedUpdate, (
-                AppComputeWorker::<W>::unmap_all,
-                AppComputeWorker::<W>::run
-            ).chain().in_set(ShaderPhysicsSet::Pass));
+            .add_systems(Update, AppComputeWorker::<W>::extract_pipelines)
+            .add_systems(PostUpdate, (
+                AppComputeWorker::<W>::unmap_all.in_set(ShaderPhysicsSet::Prepare),
+                AppComputeWorker::<W>::run.in_set(ShaderPhysicsSet::Pass)
+            ));
     }
 }
 
