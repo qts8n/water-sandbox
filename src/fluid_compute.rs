@@ -70,19 +70,6 @@ impl Default for FluidStaticProps {
 }
 
 
-#[derive(ShaderType, Pod, Zeroable, Clone, Copy, Default)]
-#[repr(C)]
-pub struct FluidParticle {
-    pub position: Vec3,
-    // pub density: Vec2,
-    // pub pressure: Vec2,
-    pub velocity: Vec3,
-    // pub acceleration: Vec3,
-    // pub predicted_position: Vec3,
-    pub _phantom_data: Vec2
-}
-
-
 #[derive(Resource, Clone, Default)]
 pub struct FluidParticlesInitial {
     pub positions: Vec<Vec3>,
@@ -163,7 +150,7 @@ struct HashParticlesShader;
 
 impl ComputeShader for HashParticlesShader {
     fn shader() -> ShaderRef {
-        "simulation.wgsl".into()
+        "bitonic_sort.wgsl".into()
     }
 
     fn entry_point<'a>() -> &'a str {
@@ -205,19 +192,20 @@ pub struct FluidWorker;
 
 
 impl FluidWorker {
-    pub fn create_initial_data_buffer(positions: &Vec<Vec3>) -> (Vec<FluidParticle>, Vec<u32>) {
-        let n_points = positions.len();
-        let mut initial_data = Vec::with_capacity(n_points);
-        let mut initial_indicies = Vec::with_capacity(n_points);
-        for (it, &position) in positions.iter().enumerate() {
-            initial_data.push(FluidParticle {
-                position,
-                velocity: Vec3::Z,
-                ..default()
-            });
-            initial_indicies.push(it as u32);
+    pub fn create_initial_index_buffer(data_length: u32) -> Vec<u32> {
+        let mut initial_indicies = Vec::with_capacity(data_length as usize);
+        for it in 0..data_length {
+            initial_indicies.push(it);
         }
-        return (initial_data, initial_indicies);
+        return initial_indicies;
+    }
+
+    pub fn create_initial_buffer<T: Default>(data_length: u32) -> Vec<T> {
+        let mut initial_buffer = Vec::with_capacity(data_length as usize);
+        for _ in 0..data_length {
+            initial_buffer.push(T::default());
+        }
+        return initial_buffer;
     }
 
     fn get_bit_sorter_stages(data_length: u32, batch_size: u32) -> Vec<BitSorterStage> {
@@ -260,69 +248,88 @@ impl ComputeWorker for FluidWorker {
         // Init positions
         let mut fluid_initials = world.resource_mut::<FluidParticlesInitial>();
         fluid_initials.positions = points.clone();
-        let (initial_data, initial_indicies) = Self::create_initial_data_buffer(&points);
 
         // Get static shader resources
         let gravity = world.resource::<Gravity>().clone();
         let container = world.resource::<FluidContainer>().clone();
 
+        // Init buffers
+        let initial_index_buffer = Self::create_initial_index_buffer(num_particles);
+        let initial_vec2_buffer = Self::create_initial_buffer::<Vec2>(num_particles);
+        let initial_vec3_buffer = Self::create_initial_buffer::<Vec3>(num_particles);
+
         let mut builder = AppComputeWorkerBuilder::new(world);
         builder
+            .add_uniform("num_particles", &static_fluid_props.num_particles)
+            .add_uniform("smoothing_radius", &static_fluid_props.smoothing_radius)
             .add_uniform("fluid_props", &static_fluid_props)
             .add_uniform("fluid_container", &container)
             .add_uniform("gravity", &gravity)
-            .add_staging("particles", &initial_data)
-            // .add_uniform("num_particles", &num_particles)
-            // .add_rw_storage("particle_indicies", &initial_indicies)
-            // .add_rw_storage("particle_cell_indicies", &initial_indicies)
-            // .add_rw_storage("cell_offsets", &initial_indicies)
-            // .add_pass::<HashParticlesShader>([batch_size, 1, 1], &[
-            //     "fluid_props",
-            //     "particles",
-            //     "particle_indicies",
-            //     "particle_cell_indicies",
-            //     "cell_offsets",
-            // ])
-            ;
+            .add_staging("positions", &points)
+            .add_rw_storage("densities", &initial_vec2_buffer)
+            .add_rw_storage("pressures", &initial_vec2_buffer)
+            .add_rw_storage("velocities", &initial_vec3_buffer)
+            .add_rw_storage("accelerations", &initial_vec3_buffer)
+            .add_rw_storage("predicted_positions", &points)
+            .add_rw_storage("particle_indicies", &initial_index_buffer)
+            .add_rw_storage("particle_cell_indicies", &initial_index_buffer)
+            .add_rw_storage("cell_offsets", &initial_index_buffer)
+            .add_pass::<HashParticlesShader>([batch_size, 1, 1], &[
+                "num_particles",
+                "particle_indicies",
+                "particle_cell_indicies",
+                "cell_offsets",
+                "predicted_positions",
+                "smoothing_radius"
+            ]);
 
         // Bitonic sort passes
         // Init bit sorter stages
-        // let bit_sorter_stages = Self::get_bit_sorter_stages(num_particles, batch_size);
-        // println!("Bit sort passes: {}", bit_sorter_stages.len());
-        // for stage in bit_sorter_stages {
-        //     builder.add_uniform(&stage.uniform_name, &stage.bit_sorter)
-        //         .add_pass::<BitonicSortShader>(stage.workgroups, &[
-        //             "num_particles",
-        //             "particle_indicies",
-        //             "particle_cell_indicies",
-        //             &stage.uniform_name,
-        //         ]);
-        // }
+        let bit_sorter_stages = Self::get_bit_sorter_stages(num_particles, batch_size);
+        println!("Bit sort passes: {}", bit_sorter_stages.len());
+        for stage in bit_sorter_stages {
+            builder.add_uniform(&stage.uniform_name, &stage.bit_sorter)
+                .add_pass::<BitonicSortShader>(stage.workgroups, &[
+                    "num_particles",
+                    "particle_indicies",
+                    "particle_cell_indicies",
+                    &stage.uniform_name,
+                ]);
+        }
 
         builder
-            // .add_pass::<CalculateCellOffsetsShader>([batch_size, 1, 1], &[
-            //     "num_particles",
-            //     "particle_indicies",
-            //     "particle_cell_indicies",
-            //     "cell_offsets",
-            // ])
-            // .add_pass::<UpdateDensityShader>([batch_size, 1, 1], &[
-            //     "fluid_props",
-            //     "particles",
-            //     "particle_indicies",
-            //     "particle_cell_indicies",
-            //     "cell_offsets",
-            // ])
-            // .add_pass::<UpdatePressureForceShader>([batch_size, 1, 1], &[
-            //     "fluid_props",
-            //     "particles",
-            //     "particle_indicies",
-            //     "particle_cell_indicies",
-            //     "cell_offsets",
-            // ])
+            .add_pass::<CalculateCellOffsetsShader>([batch_size, 1, 1], &[
+                "num_particles",
+                "particle_indicies",
+                "particle_cell_indicies",
+                "cell_offsets",
+            ])
+            .add_pass::<UpdateDensityShader>([batch_size, 1, 1], &[
+                "fluid_props",
+                "positions",
+                "velocities",
+                "accelerations",
+                "predicted_positions",
+                "particle_indicies",
+                "particle_cell_indicies",
+                "cell_offsets",
+            ])
+            .add_pass::<UpdatePressureForceShader>([batch_size, 1, 1], &[
+                "fluid_props",
+                "positions",
+                "velocities",
+                "accelerations",
+                "predicted_positions",
+                "particle_indicies",
+                "particle_cell_indicies",
+                "cell_offsets",
+            ])
             .add_pass::<IntegrateShader>([batch_size, 1, 1], &[
                 "fluid_props",
-                "particles",
+                "positions",
+                "velocities",
+                "accelerations",
+                "predicted_positions",
                 "fluid_container",
                 "gravity",
             ])
@@ -432,7 +439,7 @@ fn setup(
 
 
 fn update(
-    mut query: Query<(&mut Transform, &mut Velocity, &FluidParticleLabel)>,
+    mut query: Query<(&mut Transform, &FluidParticleLabel)>,
     mut worker: ResMut<AppComputeWorker<FluidWorker>>,
     fluid_props: Res<FluidStaticProps>,
     gravity: Res<Gravity>,
@@ -441,14 +448,15 @@ fn update(
         return;
     }
 
-    let particles = worker.read_vec::<FluidParticle>("particles");
+    // NOTE: for some reason Vec3 becomes Vec4 in staging buffer
+    let positions = worker.read_vec::<Vec4>("positions");
+    worker.write("num_particles", &fluid_props.num_particles);
+    worker.write("smoothing_radius", &fluid_props.smoothing_radius);
     worker.write("fluid_props", fluid_props.as_ref());
     worker.write("gravity", gravity.as_ref());
 
-    query.par_iter_mut().for_each(|(mut transform, mut velocity, particle)| {
-        let p = particles[particle.0];
-        transform.translation = p.position.clone();
-        velocity.0 = p.velocity.clone();
+    query.par_iter_mut().for_each(|(mut transform, particle)| {
+        transform.translation = positions[particle.0].xyz();
     });
 }
 
@@ -481,9 +489,19 @@ fn despawn_liquid(
 
     next_state.set(GameState::GameOver);
 
-    let (initial_data, initial_indicies) = FluidWorker::create_initial_data_buffer(&fluid_initials.positions);
-    worker.write_slice("particles", &initial_data);
-    // worker.write_slice("particle_indicies", &initial_indicies);
-    // worker.write_slice("particle_cell_indicies", &initial_indicies);
-    // worker.write_slice("cell_offsets", &initial_indicies);
+    let num_particles = fluid_initials.positions.len() as u32;
+    let initial_index_buffer = FluidWorker::create_initial_index_buffer(num_particles);
+    let initial_vec2_buffer = FluidWorker::create_initial_buffer::<Vec2>(num_particles);
+    let initial_vec3_buffer = FluidWorker::create_initial_buffer::<Vec3>(num_particles);
+
+    worker.write_slice("positions", &fluid_initials.positions);
+    worker.write_slice("densities", &initial_vec2_buffer);
+    worker.write_slice("pressures", &initial_vec2_buffer);
+    worker.write_slice("velocities", &initial_vec3_buffer);
+    worker.write_slice("accelerations", &initial_vec3_buffer);
+    worker.write_slice("predicted_positions", &fluid_initials.positions);
+
+    worker.write_slice("particle_indicies", &initial_index_buffer);
+    worker.write_slice("particle_cell_indicies", &initial_index_buffer);
+    worker.write_slice("cell_offsets", &initial_index_buffer);
 }

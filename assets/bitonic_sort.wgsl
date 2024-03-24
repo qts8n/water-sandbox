@@ -1,5 +1,11 @@
 const WORKGROUP_SIZE: u32 = 1024;
 
+const INF: u32 = 999999999;
+
+const P1: u32 = 15823;  // Some large primes for hashing
+const P2: u32 = 9737333;
+const P3: u32 = 440817757;
+
 struct BitSorter {
     block_size: u32,
     dim: u32,
@@ -7,11 +13,35 @@ struct BitSorter {
 
 @group(0) @binding(0) var<uniform> num_particles: u32;
 @group(0) @binding(1) var<storage, read_write> particle_indicies: array<u32>;
-@group(0) @binding(2) var<storage> particle_cell_indicies: array<u32>;
+@group(0) @binding(2) var<storage, read_write> particle_cell_indicies: array<u32>;
 // Used in bitsort
 @group(0) @binding(3) var<uniform> bit_sorter: BitSorter;
-// Used in calculating the cell offsets
+// Used elsewhere
 @group(0) @binding(3) var<storage, read_write> cell_offsets: array<atomic<u32> >;
+@group(0) @binding(4) var<storage, read_write> predicted_positions: array<vec3f>;
+@group(0) @binding(5) var<uniform> smoothing_radius: f32;
+
+fn get_cell(position: vec3<f32>) -> vec3<i32> {
+    return vec3<i32>(floor(position / smoothing_radius));
+}
+
+fn hash_cell(cell_index: vec3<i32>) -> u32 {
+    let cell = vec3<u32>(cell_index);
+    return (cell.x * P1 + cell.y * P2 + cell.z * P3) % num_particles;
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE, 1, 1)
+fn hash_particles(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    // Check workgroup boundary
+    let index = invocation_id.x;
+    if index >= num_particles {
+        return;
+    }
+
+    cell_offsets[index] = INF;
+    let particle_index = particle_indicies[index];
+    particle_cell_indicies[particle_index] = hash_cell(get_cell(predicted_positions[particle_index]));
+}
 
 @compute @workgroup_size(WORKGROUP_SIZE, 1, 1)
 fn bitonic_sort(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
