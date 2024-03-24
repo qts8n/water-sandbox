@@ -29,7 +29,7 @@ impl Plugin for SchedulePlugin {
                 InGameSet::UserInput,
                 InGameSet::EntityUpdates,
             ).chain().run_if(in_state(GameState::InGame)))
-            .configure_sets(FixedUpdate, (
+            .configure_sets(PostUpdate, (
                 ShaderPhysicsSet::Prepare,
                 ShaderPhysicsSet::Pass,
             ).chain().run_if(in_state(GameState::InGame)));
