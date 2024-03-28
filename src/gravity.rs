@@ -9,26 +9,26 @@ const GRAVITY_FORCE: f32 = 9.8;
 #[derive(Resource, ShaderType, Pod, Zeroable, Clone, Copy)]
 #[repr(C)]
 pub struct Gravity {
-    pub value: Vec3,
+    pub value: Vec4,
 }
 
 
 impl Gravity {
-    pub fn new(value: Vec3) -> Self { Self { value } }
+    pub fn new(value: Vec4) -> Self { Self { value } }
 
     pub fn set_zero(&mut self) {
-        self.value = Vec3::ZERO;
+        self.value = Vec4::ZERO;
     }
 
     pub fn set_default(&mut self) {
-        self.value = Vec3::new(0., -GRAVITY_FORCE, 0.);
+        self.value = Vec4::new(0., -GRAVITY_FORCE, 0., 0.);
     }
 }
 
 
 impl Default for Gravity {
     fn default() -> Self {
-        Self::new(Vec3::new(0., -GRAVITY_FORCE, 0.))
+        Self::new(Vec4::new(0., -GRAVITY_FORCE, 0., 0.))
     }
 }
 

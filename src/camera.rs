@@ -42,14 +42,14 @@ impl Plugin for CameraPlugin {
 
 
 fn spawn_camera(mut commands: Commands, container: Res<FluidContainer>) {
-    let mut camera_translation = container.size / 2.;
+    let mut camera_translation = container.size.xyz() / 2.;
     camera_translation.z *= 5.;  // Set it further
     camera_translation.x = 0.; // Set on X axis
-    camera_translation += container.position;  // Translate to container origin
+    camera_translation += container.position.xyz();  // Translate to container origin
 
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_translation(camera_translation).looking_at(container.position, Vec3::Y),
+            transform: Transform::from_translation(camera_translation).looking_at(container.position.xyz(), Vec3::Y),
             ..default()
         },
         PanOrbitCamera {
