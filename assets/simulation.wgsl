@@ -3,7 +3,38 @@ const WORKGROUP_SIZE: u32 = 1024;
 const LOOKAHEAD_FACTOR: f32 = 1. / 50.;
 const DENSITY_PADDING: f32 = 0.00001;
 
+const OFFSET_TABLE: array<vec3i, 27> = array<vec3i, 27>(
+    vec3i(-1, -1, -1),
+    vec3i(-1, -1, 0),
+    vec3i(-1, -1, 1),
+    vec3i(-1, 0, -1),
+    vec3i(-1, 0, 0),
+    vec3i(-1, 0, 1),
+    vec3i(-1, 1, -1),
+    vec3i(-1, 1, 0),
+    vec3i(-1, 1, 1),
+    vec3i(0, -1, -1),
+    vec3i(0, -1, 0),
+    vec3i(0, -1, 1),
+    vec3i(0, 0, -1),
+    vec3i(0, 0, 0),
+    vec3i(0, 0, 1),
+    vec3i(0, 1, -1),
+    vec3i(0, 1, 0),
+    vec3i(0, 1, 1),
+    vec3i(1, -1, -1),
+    vec3i(1, -1, 0),
+    vec3i(1, -1, 1),
+    vec3i(1, 0, -1),
+    vec3i(1, 0, 0),
+    vec3i(1, 0, 1),
+    vec3i(1, 1, -1),
+    vec3i(1, 1, 0),
+    vec3i(1, 1, 1),
+);
+
 const INF: u32 = 999999999;
+
 const P1: u32 = 15823;  // Some large primes for hashing
 const P2: u32 = 9737333;
 const P3: u32 = 440817757;
@@ -117,6 +148,8 @@ fn update_density(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         return;
     }
 
+    var offset_table = OFFSET_TABLE;
+
     let particle_index = particle_indicies[index];
     let origin = particles[particle_index].predicted_position;
     let cell_index = get_cell(origin.xyz);
@@ -126,34 +159,29 @@ fn update_density(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var near_density: f32 = 0.;
 
     // Iterate neighbour cells
-    for (var i = -1; i <= 1; i++) {
-        for (var j = -1; j <= 1; j++) {
-            for (var k = -1; k <= 1; k++) {
-                let neighbour_cell_index = cell_index + vec3(i, j, k);
-                let hash_index = hash_cell(neighbour_cell_index);
-                var neighbour_it = cell_offsets[hash_index];
-
-                // Iterate neighbours in the cell
-                while (neighbour_it < num_particles) {
-                    let neighbour_index = particle_indicies[neighbour_it];
-                    if particle_cell_indicies[neighbour_index] != hash_index {
-                        break;
-                    }
-
-                    let neighbour = particles[neighbour_index];
-
-                    let dst = distance(neighbour.predicted_position, origin);
-                    if dst > fluid_props.smoothing_radius {
-                        neighbour_it++;
-                        continue;
-                    }
-
-                    density += smoothing_kernel(dst);
-                    near_density += smoothing_kernel_near(dst);
-
-                    neighbour_it++;
-                }
+    for (var i = 0; i < 27; i++) {
+        let neighbour_cell_index = cell_index + offset_table[i];
+        let hash_index = hash_cell(neighbour_cell_index);
+        var neighbour_it = cell_offsets[hash_index];
+        // Iterate neighbours in the cell
+        while (neighbour_it < num_particles) {
+            let neighbour_index = particle_indicies[neighbour_it];
+            if particle_cell_indicies[neighbour_index] != hash_index {
+                break;
             }
+
+            let neighbour = particles[neighbour_index];
+
+            let dst = distance(neighbour.predicted_position, origin);
+            if dst > fluid_props.smoothing_radius {
+                neighbour_it++;
+                continue;
+            }
+
+            density += smoothing_kernel(dst);
+            near_density += smoothing_kernel_near(dst);
+
+            neighbour_it++;
         }
     }
 
@@ -176,6 +204,8 @@ fn update_pressure_force(@builtin(global_invocation_id) invocation_id: vec3<u32>
         return;
     }
 
+    var offset_table = OFFSET_TABLE;
+
     let particle_index = particle_indicies[index];
     let origin = particles[particle_index].predicted_position;
     let velocity = particles[particle_index].velocity;
@@ -188,55 +218,51 @@ fn update_pressure_force(@builtin(global_invocation_id) invocation_id: vec3<u32>
     var viscosity_force = vec3(0.);
 
     // Iterate neighbour cells
-    for (var i = -1; i <= 1; i++) {
-        for (var j = -1; j <= 1; j++) {
-            for (var k = -1; k <= 1; k++) {
-                let neighbour_cell_index = cell_index + vec3(i, j, k);
-                let hash_index = hash_cell(neighbour_cell_index);
-                var neighbour_it = cell_offsets[hash_index];
+    for (var i = 0; i < 27; i++) {
+        let neighbour_cell_index = cell_index + offset_table[i];
+        let hash_index = hash_cell(neighbour_cell_index);
+        var neighbour_it = cell_offsets[hash_index];
 
-                // Iterate neighbours in the cell
-                while (neighbour_it < num_particles) {
-                    let neighbour_index = particle_indicies[neighbour_it];
-                    if particle_cell_indicies[neighbour_index] != hash_index {
-                        break;
-                    }
-
-                    neighbour_it++;
-
-                    if particle_index == neighbour_index {
-                        continue;
-                    }
-
-                    let neighbour = particles[neighbour_index];
-
-                    // Find direction of the force
-                    var dir = (neighbour.predicted_position - origin).xyz;
-                    let dst = distance(neighbour.predicted_position, origin);
-                    if dst > fluid_props.smoothing_radius {
-                        continue;
-                    }
-                    if dst > 0. {
-                        dir /= dst;
-                    } else {
-                        dir = vec3(0., 1., 0.);
-                    }
-
-                    // Calculate pressure contribution taking into account shared pressure
-                    let slope = smoothing_kernel_derivative(dst);
-                    let shared_pressure = (pressure + neighbour.pressure.x) / 2.;
-
-                    // Calculate near pressure contribution
-                    let slope_near = smoothing_kernel_derivative_near(dst);
-                    let shared_pressure_near = (near_pressure + neighbour.pressure.y) / 2.;
-
-                    pressure_force += dir * shared_pressure * slope / neighbour.density.x;
-                    pressure_force += dir * shared_pressure_near * slope_near / neighbour.density.y;
-
-                    let viscosity = smoothing_kernel_viscosity(dst);
-                    viscosity_force += (neighbour.velocity - velocity).xyz * viscosity;
-                }
+        // Iterate neighbours in the cell
+        while (neighbour_it < num_particles) {
+            let neighbour_index = particle_indicies[neighbour_it];
+            if particle_cell_indicies[neighbour_index] != hash_index {
+                break;
             }
+
+            neighbour_it++;
+
+            if particle_index == neighbour_index {
+                continue;
+            }
+
+            let neighbour = particles[neighbour_index];
+
+            // Find direction of the force
+            var dir = (neighbour.predicted_position - origin).xyz;
+            let dst = distance(neighbour.predicted_position, origin);
+            if dst > fluid_props.smoothing_radius {
+                continue;
+            }
+            if dst > 0. {
+                dir /= dst;
+            } else {
+                dir = vec3(0., 1., 0.);
+            }
+
+            // Calculate pressure contribution taking into account shared pressure
+            let slope = smoothing_kernel_derivative(dst);
+            let shared_pressure = (pressure + neighbour.pressure.x) / 2.;
+
+            // Calculate near pressure contribution
+            let slope_near = smoothing_kernel_derivative_near(dst);
+            let shared_pressure_near = (near_pressure + neighbour.pressure.y) / 2.;
+
+            pressure_force += dir * shared_pressure * slope / neighbour.density.x;
+            pressure_force += dir * shared_pressure_near * slope_near / neighbour.density.y;
+
+            let viscosity = smoothing_kernel_viscosity(dst);
+            viscosity_force += (neighbour.velocity - velocity).xyz * viscosity;
         }
     }
     let pressure_contribution = pressure_force / particles[particle_index].density.x;
