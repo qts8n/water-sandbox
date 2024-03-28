@@ -1,3 +1,4 @@
+use std::f32::consts::PI;
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
@@ -18,7 +19,6 @@ const WORKGROUP_SIZE: u32 = 1024;
 
 const PARTICLE_RADIUS: f32 = 0.1;
 const PARTICLE_COLLISION_DAMPING: f32 = 0.95;
-const PARTICLE_MASS: f32 = 1.;
 const PARTICLE_SMOOTHING_RADIUS: f32 = 0.25;
 const PARTICLE_TARGET_DENSITY: f32 = 10.;
 const PARTICLE_PRESSURE_SCALAR: f32 = 22.;
@@ -27,14 +27,22 @@ const PARTICLE_VISCOSITY_STRENGTH: f32 = 0.1;
 const PARTICLE_LOOKAHEAD_SCALAR: f32 = 1. / 60.;
 
 
+#[derive(ShaderType, Pod, Zeroable, Clone, Copy)]
+#[repr(C)]
+pub struct SmoothingKernel {
+    pub pow2: f32,
+    pub pow2_der: f32,
+    pub pow3: f32,
+    pub pow3_der: f32,
+    pub spikey_pow3: f32,
+}
+
+
 #[derive(Resource, ShaderType, Pod, Zeroable, Clone, Copy)]
 #[repr(C)]
 pub struct FluidStaticProps {
     pub delta_time: f32,
-    pub num_particles: u32,
     pub collision_damping: f32,
-    pub mass: f32,
-    pub radius: f32,
     pub smoothing_radius: f32,
     pub target_density: f32,
     pub pressure_scalar: f32,
@@ -44,12 +52,14 @@ pub struct FluidStaticProps {
 
 
 impl FluidStaticProps {
-    pub fn get_batch_size(&self) -> u32 {
-        let mut batch_size = self.num_particles / WORKGROUP_SIZE;
-        if self.num_particles % WORKGROUP_SIZE > 0 {
-            batch_size += 1;
+    pub fn get_smoothing_kernel(&self) -> SmoothingKernel {
+        SmoothingKernel {
+            pow2: 15. / (2. * PI * self.smoothing_radius.powi(5)),
+            pow2_der: 15. / (PI * self.smoothing_radius.powi(5)),
+            pow3: 15. / (PI * self.smoothing_radius.powi(6)),
+            pow3_der: 45. / (PI * self.smoothing_radius.powi(6)),
+            spikey_pow3: 315. / (64. * PI * self.smoothing_radius.powi(9)),
         }
-        return batch_size;
     }
 }
 
@@ -59,9 +69,6 @@ impl Default for FluidStaticProps {
         Self {
             delta_time: PARTICLE_LOOKAHEAD_SCALAR,
             collision_damping: PARTICLE_COLLISION_DAMPING,
-            num_particles: 0,
-            mass: PARTICLE_MASS,
-            radius: PARTICLE_RADIUS,
             smoothing_radius: PARTICLE_SMOOTHING_RADIUS,
             target_density: PARTICLE_TARGET_DENSITY,
             pressure_scalar: PARTICLE_PRESSURE_SCALAR,
@@ -70,6 +77,9 @@ impl Default for FluidStaticProps {
         }
     }
 }
+
+
+
 
 
 #[derive(Resource, Clone, Default)]
@@ -215,6 +225,15 @@ impl ComputeShader for CalculateCellOffsetsShader {
 }
 
 
+fn get_batch_size(data_length: u32) -> u32 {
+    let mut batch_size = data_length / WORKGROUP_SIZE;
+    if data_length % WORKGROUP_SIZE > 0 {
+        batch_size += 1;
+    }
+    return batch_size;
+}
+
+
 pub struct FluidWorker;
 
 
@@ -255,38 +274,38 @@ impl FluidWorker {
 
 impl ComputeWorker for FluidWorker {
     fn build(world: &mut World) -> AppComputeWorker<Self> {
-        // Init static props
-        let mut fluid_props = world.resource_mut::<FluidStaticProps>();
-        let points = cube_fluid(NI_SIZE, NJ_SIZE, NK_SIZE, fluid_props.radius);
+        // Get static shader resources
+        let fluid_props = world.resource::<FluidStaticProps>().clone();
+        let gravity = world.resource::<Gravity>().clone();
+        let container = world.resource::<FluidContainer>().clone();
+
+        // Init positions
+        let points = cube_fluid(NI_SIZE, NJ_SIZE, NK_SIZE, PARTICLE_RADIUS);
         let num_particles = points.len() as u32;
-        fluid_props.num_particles = num_particles;
-        let batch_size = fluid_props.get_batch_size();
-        println!("NUM PARTICLES: {}; BATCH_SIZE: {}", num_particles, batch_size);
-        let static_fluid_props = fluid_props.clone();
 
         // Init positions
         let mut fluid_initials = world.resource_mut::<FluidParticlesInitial>();
         fluid_initials.positions = points.clone();
 
-        // Get static shader resources
-        let gravity = world.resource::<Gravity>().clone();
-        let container = world.resource::<FluidContainer>().clone();
-
         // Init buffers
         let initial_index_buffer = Self::create_initial_index_buffer(num_particles);
         let initial_particle_buffer = FluidParticle::make_vec_from_positions(points);
 
+        // Init worker
+        let batch_size = get_batch_size(num_particles);
         let mut builder = AppComputeWorkerBuilder::new(world);
         builder
-            .add_uniform("num_particles", &static_fluid_props.num_particles)
-            .add_uniform("fluid_props", &static_fluid_props)
-            .add_uniform("fluid_container", &container)
+            .add_uniform("num_particles", &num_particles)
+            .add_uniform("fluid_props", &fluid_props)
+            .add_uniform("fluid_container", &container.get_ext(PARTICLE_RADIUS))
             .add_uniform("gravity", &gravity)
             .add_staging("particles", &initial_particle_buffer)
+            .add_uniform("smoothing_kernel", &fluid_props.get_smoothing_kernel())
             .add_rw_storage("particle_indicies", &initial_index_buffer)
             .add_rw_storage("particle_cell_indicies", &initial_index_buffer)
             .add_rw_storage("cell_offsets", &initial_index_buffer)
             .add_pass::<HashParticlesShader>([batch_size, 1, 1], &[
+                "num_particles",
                 "fluid_props",
                 "particles",
                 "particle_indicies",
@@ -316,20 +335,25 @@ impl ComputeWorker for FluidWorker {
                 "cell_offsets",
             ])
             .add_pass::<UpdateDensityShader>([batch_size, 1, 1], &[
+                "num_particles",
                 "fluid_props",
                 "particles",
                 "particle_indicies",
                 "particle_cell_indicies",
                 "cell_offsets",
+                "smoothing_kernel",
             ])
             .add_pass::<UpdatePressureForceShader>([batch_size, 1, 1], &[
+                "num_particles",
                 "fluid_props",
                 "particles",
                 "particle_indicies",
                 "particle_cell_indicies",
                 "cell_offsets",
+                "smoothing_kernel",
             ])
             .add_pass::<IntegrateShader>([batch_size, 1, 1], &[
+                "num_particles",
                 "fluid_props",
                 "particles",
                 "fluid_container",
@@ -413,10 +437,9 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    fluid_props: Res<FluidStaticProps>,
     fluid_initials: Res<FluidParticlesInitial>,
 ) {
-    let shape = meshes.add(Sphere::new(fluid_props.radius).mesh().ico(0).unwrap());
+    let shape = meshes.add(Sphere::new(PARTICLE_RADIUS).mesh().ico(0).unwrap());
     let material = materials.add(StandardMaterial {
         base_color: Color::CYAN,
         ..default()
@@ -451,8 +474,8 @@ fn update(
     }
 
     let particles = worker.read_vec::<FluidParticle>("particles");
-    worker.write("num_particles", &fluid_props.num_particles);
     worker.write("fluid_props", fluid_props.as_ref());
+    worker.write("smoothing_kernel", &fluid_props.get_smoothing_kernel());
     worker.write("gravity", gravity.as_ref());
 
     query.par_iter_mut().for_each(|(mut transform, particle)| {

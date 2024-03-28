@@ -3,19 +3,14 @@ const WORKGROUP_SIZE: u32 = 1024;
 const LOOKAHEAD_FACTOR: f32 = 1. / 50.;
 const DENSITY_PADDING: f32 = 0.00001;
 
-const PI: f32 = 3.141592653589793238;  // Math constants
 const INF: u32 = 999999999;
-
 const P1: u32 = 15823;  // Some large primes for hashing
 const P2: u32 = 9737333;
 const P3: u32 = 440817757;
 
 struct FluidProps {
     delta_time: f32,
-    num_particles: u32,
     collision_damping: f32,
-    mass: f32,
-    radius: f32,
     smoothing_radius: f32,
     target_density: f32,
     pressure_scalar: f32,
@@ -23,9 +18,17 @@ struct FluidProps {
     viscosity_strength: f32,
 }
 
+struct SmoothingKernel {
+    pow2: f32,
+    pow2_der: f32,
+    pow3: f32,
+    pow3_der: f32,
+    spikey_pow3: f32,
+}
+
 struct FluidContainer {
-    position: vec4<f32>,
-    size: vec4<f32>,
+    ext_min: vec4<f32>,
+    ext_max: vec4<f32>,
 }
 
 struct Gravity {
@@ -42,47 +45,44 @@ struct FluidParticle {
 }
 
 // Shared between passes
-@group(0) @binding(0) var<uniform> fluid_props: FluidProps;
-@group(0) @binding(1) var<storage, read_write> particles: array<FluidParticle>;
+@group(0) @binding(0) var<uniform> num_particles: u32;
+@group(0) @binding(1) var<uniform> fluid_props: FluidProps;
+@group(0) @binding(2) var<storage, read_write> particles: array<FluidParticle>;
 // Only used in integrate
-@group(0) @binding(2) var<uniform> fluid_container: FluidContainer;
-@group(0) @binding(3) var<uniform> gravity: Gravity;
+@group(0) @binding(3) var<uniform> fluid_container: FluidContainer;
+@group(0) @binding(4) var<uniform> gravity: Gravity;
 // Used elsewhere
-@group(0) @binding(2) var<storage> particle_indicies: array<u32>;
-@group(0) @binding(3) var<storage, read_write> particle_cell_indicies: array<u32>;
-@group(0) @binding(4) var<storage, read_write> cell_offsets: array<u32>;
+@group(0) @binding(3) var<storage> particle_indicies: array<u32>;
+@group(0) @binding(4) var<storage, read_write> particle_cell_indicies: array<u32>;
+@group(0) @binding(5) var<storage, read_write> cell_offsets: array<u32>;
+@group(0) @binding(6) var<uniform> kernel: SmoothingKernel;
 
 // Smothing radius kernel functions
 
 fn smoothing_kernel(dst: f32) -> f32 {
-    let volume = 15. / (2. * PI * pow(fluid_props.smoothing_radius, 5.));
     let v = fluid_props.smoothing_radius - dst;
-    return v * v * volume;
+    return v * v * kernel.pow2;
 }
 
 fn smoothing_kernel_near(dst: f32) -> f32 {
-    let volume = 15. / (PI * pow(fluid_props.smoothing_radius, 6.));
     let v = fluid_props.smoothing_radius - dst;
-    return v * v * v * volume;
+    return v * v * v * kernel.pow3;
 }
 
 // Slope calculation
 
 fn smoothing_kernel_derivative(dst: f32) -> f32 {
-    let scale = 15. / (PI * pow(fluid_props.smoothing_radius, 5.));
-    return (dst - fluid_props.smoothing_radius) * scale;
+    return (dst - fluid_props.smoothing_radius) * kernel.pow2_der;
 }
 
 fn smoothing_kernel_derivative_near(dst: f32) -> f32 {
-    let scale = 45. / (PI * pow(fluid_props.smoothing_radius, 6.));
     let v = dst - fluid_props.smoothing_radius;
-    return v * v * scale;
+    return v * v * kernel.pow3_der;
 }
 
 fn smoothing_kernel_viscosity(dst: f32) -> f32 {
-    let volume = 315. / (64. * PI * pow(fluid_props.smoothing_radius, 9.));
     let v = fluid_props.smoothing_radius * fluid_props.smoothing_radius - dst * dst;
-    return v * v * v * volume;
+    return v * v * v * kernel.spikey_pow3;
 }
 
 // Hashing cell indicies
@@ -93,14 +93,14 @@ fn get_cell(position: vec3<f32>) -> vec3<i32> {
 
 fn hash_cell(cell_index: vec3<i32>) -> u32 {
     let cell = vec3<u32>(cell_index);
-    return (cell.x * P1 + cell.y * P2 + cell.z * P3) % fluid_props.num_particles;
+    return (cell.x * P1 + cell.y * P2 + cell.z * P3) % num_particles;
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE, 1, 1)
 fn hash_particles(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Check workgroup boundary
     let index = invocation_id.x;
-    if index >= fluid_props.num_particles {
+    if index >= num_particles {
         return;
     }
 
@@ -113,7 +113,7 @@ fn hash_particles(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 fn update_density(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Check workgroup boundary
     let index = invocation_id.x;
-    if index >= fluid_props.num_particles {
+    if index >= num_particles {
         return;
     }
 
@@ -134,7 +134,7 @@ fn update_density(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
                 var neighbour_it = cell_offsets[hash_index];
 
                 // Iterate neighbours in the cell
-                while (neighbour_it < fluid_props.num_particles) {
+                while (neighbour_it < num_particles) {
                     let neighbour_index = particle_indicies[neighbour_it];
                     if particle_cell_indicies[neighbour_index] != hash_index {
                         break;
@@ -158,8 +158,8 @@ fn update_density(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     }
 
     // Store density
-    density = fluid_props.mass * density + DENSITY_PADDING;
-    near_density = fluid_props.mass * near_density + DENSITY_PADDING;
+    density = density + DENSITY_PADDING;
+    near_density = near_density + DENSITY_PADDING;
     particles[particle_index].density = vec2(density, near_density);
 
     // Convert density to pressure
@@ -172,7 +172,7 @@ fn update_density(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 fn update_pressure_force(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Check workgroup boundary
     let index = invocation_id.x;
-    if index >= fluid_props.num_particles {
+    if index >= num_particles {
         return;
     }
 
@@ -196,7 +196,7 @@ fn update_pressure_force(@builtin(global_invocation_id) invocation_id: vec3<u32>
                 var neighbour_it = cell_offsets[hash_index];
 
                 // Iterate neighbours in the cell
-                while (neighbour_it < fluid_props.num_particles) {
+                while (neighbour_it < num_particles) {
                     let neighbour_index = particle_indicies[neighbour_it];
                     if particle_cell_indicies[neighbour_index] != hash_index {
                         break;
@@ -221,7 +221,6 @@ fn update_pressure_force(@builtin(global_invocation_id) invocation_id: vec3<u32>
                     } else {
                         dir = vec3(0., 1., 0.);
                     }
-                    dir *= fluid_props.mass;
 
                     // Calculate pressure contribution taking into account shared pressure
                     let slope = smoothing_kernel_derivative(dst);
@@ -250,41 +249,37 @@ fn update_pressure_force(@builtin(global_invocation_id) invocation_id: vec3<u32>
 fn integrate(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     // Check workgroup boundary
     let index = invocation_id.x;
-    if index >= fluid_props.num_particles {
+    if index >= num_particles {
         return;
     }
 
     // Integrate
-    particles[index].velocity += (gravity.value + particles[index].acceleration) / fluid_props.mass * fluid_props.delta_time;
+    particles[index].velocity += (gravity.value + particles[index].acceleration) * fluid_props.delta_time;
     particles[index].position += particles[index].velocity * fluid_props.delta_time;
 
     // Handle collisions
-    let half_size = fluid_container.size / 2.;
-    let ext_min = fluid_container.position - half_size + fluid_props.radius;
-    let ext_max = fluid_container.position + half_size - fluid_props.radius;
-
-    if particles[index].position.x < ext_min.x {
+    if particles[index].position.x < fluid_container.ext_min.x {
         particles[index].velocity.x *= -1. * fluid_props.collision_damping;
-        particles[index].position.x = ext_min.x;
-    } else if particles[index].position.x > ext_max.x {
+        particles[index].position.x = fluid_container.ext_min.x;
+    } else if particles[index].position.x > fluid_container.ext_max.x {
         particles[index].velocity.x *= -1. * fluid_props.collision_damping;
-        particles[index].position.x = ext_max.x;
+        particles[index].position.x = fluid_container.ext_max.x;
     }
 
-    if particles[index].position.y < ext_min.y {
+    if particles[index].position.y < fluid_container.ext_min.y {
         particles[index].velocity.y *= -1. * fluid_props.collision_damping;
-        particles[index].position.y = ext_min.y;
-    } else if particles[index].position.y > ext_max.y {
+        particles[index].position.y = fluid_container.ext_min.y;
+    } else if particles[index].position.y > fluid_container.ext_max.y {
         particles[index].velocity.y *= -1. * fluid_props.collision_damping;
-        particles[index].position.y = ext_max.y;
+        particles[index].position.y = fluid_container.ext_max.y;
     }
 
-    if particles[index].position.z < ext_min.z {
+    if particles[index].position.z < fluid_container.ext_min.z {
         particles[index].velocity.z *= -1. * fluid_props.collision_damping;
-        particles[index].position.z = ext_min.z;
-    } else if particles[index].position.z > ext_max.z {
+        particles[index].position.z = fluid_container.ext_min.z;
+    } else if particles[index].position.z > fluid_container.ext_max.z {
         particles[index].velocity.z *= -1. * fluid_props.collision_damping;
-        particles[index].position.z = ext_max.z;
+        particles[index].position.z = fluid_container.ext_max.z;
     }
 
     // Calculate predicted postions
