@@ -5,19 +5,27 @@ use bytemuck::Zeroable;
 
 use crate::schedule::InGameSet;
 
-const FLUID_CONTAINER_SIZE: Vec2 = Vec2::new(32., 18.);
-const FLUID_CONTAINER_POSITION: Vec2 = Vec2::ZERO;
+const FLUID_CONTAINER_SIZE: Vec3 = Vec3::new(16., 9., 9.);
+const FLUID_CONTAINER_POSITION: Vec3 = Vec3::ZERO;
 
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct FluidContainerGizmo;
 
 
-#[derive(Resource, ShaderType, Pod, Zeroable, Clone, Copy)]
+#[derive(ShaderType, Pod, Zeroable, Clone, Copy)]
+#[repr(C)]
+pub struct FluidContainerExt {
+    pub ext_min: Vec4,
+    pub ext_max: Vec4,
+}
+
+
+#[derive(Resource, Clone)]
 #[repr(C)]
 pub struct FluidContainer {
-    pub position: Vec2,
-    pub size: Vec2,
+    pub position: Vec3,
+    pub size: Vec3,
 }
 
 
@@ -26,6 +34,18 @@ impl Default for FluidContainer {
         Self {
             position: FLUID_CONTAINER_POSITION,
             size: FLUID_CONTAINER_SIZE,
+        }
+    }
+}
+
+impl FluidContainer {
+    pub fn get_ext(&self, padding: f32) -> FluidContainerExt {
+        let half_size = self.size / 2.;
+        let ext_min = (self.position - half_size + padding).extend(0.);
+        let ext_max = (self.position + half_size - padding).extend(0.);
+        FluidContainerExt {
+            ext_min,
+            ext_max,
         }
     }
 }
@@ -39,11 +59,20 @@ impl Plugin for GizmoPlugin {
         app
             .init_gizmo_group::<FluidContainerGizmo>()
             .init_resource::<FluidContainer>()
+            .add_systems(Startup, setup_gizmo_config)
             .add_systems(Update, draw_gizmos.in_set(InGameSet::EntityUpdates));
     }
 }
 
 
+fn setup_gizmo_config(mut config_store: ResMut<GizmoConfigStore>) {
+    let (config, _) = config_store.config_mut::<FluidContainerGizmo>();
+    config.line_width = 3.;  // Make it chunky
+    // config.depth_bias = -1.;  // Draw on top of everything
+}
+
+
 fn draw_gizmos(mut border_gizmos: Gizmos<FluidContainerGizmo>, container: Res<FluidContainer>) {
-    border_gizmos.rect_2d(container.position, 0., container.size, Color::WHITE);
+    let transform = Transform::from_translation(container.position).with_scale(container.size);
+    border_gizmos.cuboid(transform, Color::WHITE);
 }

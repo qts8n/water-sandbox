@@ -1,4 +1,10 @@
-const WORKGROUP_SIZE: u32 = 32;
+const WORKGROUP_SIZE: u32 = 1024;
+
+const INF: u32 = 999999999;
+
+const P1: u32 = 15823;  // Some large primes for hashing
+const P2: u32 = 9737333;
+const P3: u32 = 440817757;
 
 struct BitSorter {
     block_size: u32,
@@ -7,10 +13,10 @@ struct BitSorter {
 
 @group(0) @binding(0) var<uniform> num_particles: u32;
 @group(0) @binding(1) var<storage, read_write> particle_indicies: array<u32>;
-@group(0) @binding(2) var<storage> particle_cell_indicies: array<u32>;
+@group(0) @binding(2) var<storage, read_write> particle_cell_indicies: array<u32>;
 // Used in bitsort
 @group(0) @binding(3) var<uniform> bit_sorter: BitSorter;
-// Used in calculating the cell offsets
+// Used elsewhere
 @group(0) @binding(3) var<storage, read_write> cell_offsets: array<atomic<u32> >;
 
 @compute @workgroup_size(WORKGROUP_SIZE, 1, 1)
