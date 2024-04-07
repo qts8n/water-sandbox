@@ -133,7 +133,7 @@ fn update_camera_position(
             any = true;
             pan_orbit.radius -= scroll * pan_orbit.radius * 0.2;
             // dont allow zoom to reach zero or you get stuck
-            pan_orbit.radius = f32::max(pan_orbit.radius, 0.05);
+            pan_orbit.radius = pan_orbit.radius.max(0.05);
         }
 
         if any {

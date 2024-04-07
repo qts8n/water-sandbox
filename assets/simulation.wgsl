@@ -169,19 +169,17 @@ fn update_density(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
             if particle_cell_indicies[neighbour_index] != hash_index {
                 break;
             }
+            neighbour_it++;
 
             let neighbour = particles[neighbour_index];
 
             let dst = distance(neighbour.predicted_position, origin);
             if dst > fluid_props.smoothing_radius {
-                neighbour_it++;
                 continue;
             }
 
             density += smoothing_kernel(dst);
             near_density += smoothing_kernel_near(dst);
-
-            neighbour_it++;
         }
     }
 
@@ -229,7 +227,6 @@ fn update_pressure_force(@builtin(global_invocation_id) invocation_id: vec3<u32>
             if particle_cell_indicies[neighbour_index] != hash_index {
                 break;
             }
-
             neighbour_it++;
 
             if particle_index == neighbour_index {
@@ -239,11 +236,11 @@ fn update_pressure_force(@builtin(global_invocation_id) invocation_id: vec3<u32>
             let neighbour = particles[neighbour_index];
 
             // Find direction of the force
-            var dir = (neighbour.predicted_position - origin).xyz;
             let dst = distance(neighbour.predicted_position, origin);
             if dst > fluid_props.smoothing_radius {
                 continue;
             }
+            var dir = (neighbour.predicted_position - origin).xyz;
             if dst > 0. {
                 dir /= dst;
             } else {

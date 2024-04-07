@@ -79,13 +79,11 @@ impl Default for FluidStaticProps {
 }
 
 
-
-
-
 #[derive(Resource, Clone, Default)]
 pub struct FluidParticlesInitial {
     pub positions: Vec<Vec3>,
 }
+
 
 #[derive(ShaderType, Pod, Zeroable, Clone, Copy)]
 #[repr(C)]
@@ -104,6 +102,7 @@ impl BitSorter {
     }
 }
 
+
 #[derive(ShaderType, Pod, Zeroable, Clone, Copy, Default)]
 #[repr(C)]
 pub struct FluidParticle {
@@ -114,6 +113,7 @@ pub struct FluidParticle {
     pub acceleration: Vec4,
     pub predicted_position: Vec4,
 }
+
 
 impl FluidParticle {
     pub fn make_vec_from_positions(points: Vec<Vec3>) -> Vec<Self> {
@@ -181,6 +181,7 @@ impl ComputeShader for UpdatePressureForceShader {
     }
 }
 
+
 #[derive(TypePath)]
 struct HashParticlesShader;
 
@@ -194,6 +195,7 @@ impl ComputeShader for HashParticlesShader {
         "hash_particles"
     }
 }
+
 
 #[derive(TypePath)]
 struct BitonicSortShader;
@@ -415,7 +417,7 @@ impl Plugin for FluidComputePlugin {
 struct FluidParticleLabel(usize);
 
 
-#[derive(Component, Debug)]
+#[derive(Component, Default, Debug)]
 struct Velocity(Vec3);
 
 
@@ -454,7 +456,7 @@ fn setup(
                 transform: Transform::from_translation(point),
                 ..default()
             },
-            Velocity(Vec3::ZERO),
+            Velocity::default(),
             FluidParticleLabel(particle_id),
         ));
         particle_id += 1;
