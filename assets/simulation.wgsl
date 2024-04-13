@@ -280,13 +280,11 @@ fn integrate(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // Integrate
     particles[index].velocity += (gravity.value + particles[index].acceleration) * fluid_props.delta_time;
-    particles[index].velocity.w = 0.;
     particles[index].position += particles[index].velocity * fluid_props.delta_time;
-    particles[index].position.w = 1.;
 
     // We're now in unit cube space
-    var local_position = (fluid_container.world_to_local * particles[index].position).xyz;
-    var local_velocity = (fluid_container.world_to_local * particles[index].velocity).xyz;
+    var local_position = fluid_container.world_to_local * particles[index].position;
+    var local_velocity = fluid_container.world_to_local * particles[index].velocity;
 
     // --- Handle collisions
     let edge_dst = HALF_SIZE - abs(local_position);
@@ -303,8 +301,8 @@ fn integrate(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
         local_velocity.z *= -1. * fluid_props.collision_damping;
     }
 
-    particles[index].position = fluid_container.local_to_world * vec4(local_position, 1.);
-    particles[index].velocity = fluid_container.local_to_world * vec4(local_velocity, 0.);
+    particles[index].position = fluid_container.local_to_world * local_position;
+    particles[index].velocity = fluid_container.local_to_world * local_velocity;
 
     // Calculate predicted postions
     particles[index].predicted_position = particles[index].position + particles[index].velocity * LOOKAHEAD_FACTOR;
