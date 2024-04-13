@@ -16,37 +16,41 @@ pub struct FluidContainerGizmo;
 
 #[derive(ShaderType, Pod, Zeroable, Clone, Copy)]
 #[repr(C)]
-pub struct FluidContainerExt {
-    pub ext_min: Vec4,
-    pub ext_max: Vec4,
+pub struct FluidContainerTransform {
+    pub world_to_local: Mat4,
+    pub local_to_world: Mat4,
+}
+
+
+impl FluidContainerTransform {
+    pub fn new(transform: Transform) -> Self {
+        let matrix = transform.compute_matrix();
+        Self {
+            world_to_local: matrix.inverse(),
+            local_to_world: matrix,
+        }
+    }
 }
 
 
 #[derive(Resource, Clone)]
 pub struct FluidContainer {
-    pub position: Vec3,
-    pub size: Vec3,
+    pub transform: Transform,
 }
 
 
 impl Default for FluidContainer {
     fn default() -> Self {
         Self {
-            position: FLUID_CONTAINER_POSITION,
-            size: FLUID_CONTAINER_SIZE,
+            transform: Transform::from_translation(FLUID_CONTAINER_POSITION)
+                .with_scale(FLUID_CONTAINER_SIZE),
         }
     }
 }
 
 impl FluidContainer {
-    pub fn get_ext(&self, padding: f32) -> FluidContainerExt {
-        let half_size = self.size / 2.;
-        let ext_min = (self.position - half_size + padding).extend(0.);
-        let ext_max = (self.position + half_size - padding).extend(0.);
-        FluidContainerExt {
-            ext_min,
-            ext_max,
-        }
+    pub fn get_transform(&self) -> FluidContainerTransform {
+        FluidContainerTransform::new(self.transform)
     }
 }
 
@@ -95,8 +99,7 @@ fn draw_gizmos(
     container: Res<FluidContainer>,
     rotator: Res<FluidContainerRotator>,
 ) {
-    let transform = Transform::from_translation(container.position).with_scale(container.size);
-    fluid_container_gizmos.cuboid(transform, Color::WHITE);
+    fluid_container_gizmos.cuboid(container.transform, Color::WHITE);
     fluid_container_gizmos.circle(rotator.position, Direction3d::X, rotator.radius, Color::RED);
     fluid_container_gizmos.circle(rotator.position, Direction3d::Y, rotator.radius, Color::GREEN);
     fluid_container_gizmos.circle(rotator.position, Direction3d::Z, rotator.radius, Color::BLUE);

@@ -39,6 +39,8 @@ const P1: u32 = 15823;  // Some large primes for hashing
 const P2: u32 = 9737333;
 const P3: u32 = 440817757;
 
+const HALF_SIZE: f32 = 0.5; // Half of the unit cube side
+
 struct FluidProps {
     delta_time: f32,
     collision_damping: f32,
@@ -58,8 +60,8 @@ struct SmoothingKernel {
 }
 
 struct FluidContainer {
-    ext_min: vec4<f32>,
-    ext_max: vec4<f32>,
+    world_to_local: mat4x4<f32>,
+    local_to_world: mat4x4<f32>,
 }
 
 struct Gravity {
@@ -278,32 +280,31 @@ fn integrate(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 
     // Integrate
     particles[index].velocity += (gravity.value + particles[index].acceleration) * fluid_props.delta_time;
+    particles[index].velocity.w = 0.;
     particles[index].position += particles[index].velocity * fluid_props.delta_time;
+    particles[index].position.w = 1.;
 
-    // Handle collisions
-    if particles[index].position.x < fluid_container.ext_min.x {
-        particles[index].velocity.x *= -1. * fluid_props.collision_damping;
-        particles[index].position.x = fluid_container.ext_min.x;
-    } else if particles[index].position.x > fluid_container.ext_max.x {
-        particles[index].velocity.x *= -1. * fluid_props.collision_damping;
-        particles[index].position.x = fluid_container.ext_max.x;
+    // We're now in unit cube space
+    var local_position = (fluid_container.world_to_local * particles[index].position).xyz;
+    var local_velocity = (fluid_container.world_to_local * particles[index].velocity).xyz;
+
+    // --- Handle collisions
+    let edge_dst = HALF_SIZE - abs(local_position);
+    if edge_dst.x <= 0. {
+        local_position.x = HALF_SIZE * sign(local_position.x);
+        local_velocity.x *= -1. * fluid_props.collision_damping;
+    }
+    if edge_dst.y <= 0. {
+        local_position.y = HALF_SIZE * sign(local_position.y);
+        local_velocity.y *= -1. * fluid_props.collision_damping;
+    }
+    if edge_dst.z <= 0. {
+        local_position.z = HALF_SIZE * sign(local_position.z);
+        local_velocity.z *= -1. * fluid_props.collision_damping;
     }
 
-    if particles[index].position.y < fluid_container.ext_min.y {
-        particles[index].velocity.y *= -1. * fluid_props.collision_damping;
-        particles[index].position.y = fluid_container.ext_min.y;
-    } else if particles[index].position.y > fluid_container.ext_max.y {
-        particles[index].velocity.y *= -1. * fluid_props.collision_damping;
-        particles[index].position.y = fluid_container.ext_max.y;
-    }
-
-    if particles[index].position.z < fluid_container.ext_min.z {
-        particles[index].velocity.z *= -1. * fluid_props.collision_damping;
-        particles[index].position.z = fluid_container.ext_min.z;
-    } else if particles[index].position.z > fluid_container.ext_max.z {
-        particles[index].velocity.z *= -1. * fluid_props.collision_damping;
-        particles[index].position.z = fluid_container.ext_max.z;
-    }
+    particles[index].position = fluid_container.local_to_world * vec4(local_position, 1.);
+    particles[index].velocity = fluid_container.local_to_world * vec4(local_velocity, 0.);
 
     // Calculate predicted postions
     particles[index].predicted_position = particles[index].position + particles[index].velocity * LOOKAHEAD_FACTOR;

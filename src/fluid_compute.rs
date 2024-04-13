@@ -299,7 +299,7 @@ impl ComputeWorker for FluidWorker {
         builder
             .add_uniform("num_particles", &num_particles)
             .add_uniform("fluid_props", &fluid_props)
-            .add_uniform("fluid_container", &container.get_ext(PARTICLE_RADIUS))
+            .add_uniform("fluid_container", &container.get_transform())
             .add_uniform("gravity", &gravity)
             .add_staging("particles", &initial_particle_buffer)
             .add_uniform("smoothing_kernel", &fluid_props.get_smoothing_kernel())
@@ -469,6 +469,7 @@ fn update(
     mut query: Query<(&mut Transform, &FluidParticleLabel)>,
     mut worker: ResMut<AppComputeWorker<FluidWorker>>,
     fluid_props: Res<FluidStaticProps>,
+    container: Res<FluidContainer>,
     gravity: Res<Gravity>,
 ) {
     if !worker.ready() {
@@ -477,6 +478,7 @@ fn update(
 
     let particles = worker.read_vec::<FluidParticle>("particles");
     worker.write("fluid_props", fluid_props.as_ref());
+    worker.write("fluid_container", &container.get_transform());
     worker.write("smoothing_kernel", &fluid_props.get_smoothing_kernel());
     worker.write("gravity", gravity.as_ref());
 
