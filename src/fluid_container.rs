@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::core::Pod;
+
 use bevy_app_compute::prelude::*;
 use bytemuck::Zeroable;
 
@@ -8,6 +9,8 @@ use crate::schedule::InGameSet;
 const FLUID_CONTAINER_SIZE: Vec3 = Vec3::new(16., 9., 9.);
 const FLUID_CONTAINER_POSITION: Vec3 = Vec3::ZERO;
 const FLUID_CONTAINER_ROTATOR_RADIUS: f32 = 2.;
+const FLUID_CONTAINER_ROTATOR_THICKNESS: f32 = 0.1;
+const FLUID_CONTAINER_ROTATOR_STEP: f32 = 0.005;
 
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -55,10 +58,22 @@ impl FluidContainer {
 }
 
 
+#[derive(PartialEq, Clone)]
+pub enum FluidContainerRotatorState {
+    Idle,
+    AroundX,
+    AroundY,
+    AroundZ,
+}
+
+
 #[derive(Resource, Clone)]
 pub struct FluidContainerRotator {
     pub position: Vec3,
     pub radius: f32,
+    pub thickness: f32,
+    pub step: f32,
+    pub state: FluidContainerRotatorState,
 }
 
 
@@ -67,6 +82,9 @@ impl Default for FluidContainerRotator {
         Self {
             position: FLUID_CONTAINER_POSITION,
             radius: FLUID_CONTAINER_ROTATOR_RADIUS,
+            thickness: FLUID_CONTAINER_ROTATOR_THICKNESS,
+            step: FLUID_CONTAINER_ROTATOR_STEP,
+            state: FluidContainerRotatorState::Idle,
         }
     }
 }
@@ -82,6 +100,10 @@ impl Plugin for GizmoPlugin {
             .init_resource::<FluidContainer>()
             .init_resource::<FluidContainerRotator>()
             .add_systems(Startup, setup_gizmo_config)
+            .add_systems(Update, (
+                change_rotator_state,
+                rotate_container,
+            ).in_set(InGameSet::UserInput))
             .add_systems(Update, draw_gizmos.in_set(InGameSet::EntityUpdates));
     }
 }
@@ -100,7 +122,72 @@ fn draw_gizmos(
     rotator: Res<FluidContainerRotator>,
 ) {
     fluid_container_gizmos.cuboid(container.transform, Color::WHITE);
-    fluid_container_gizmos.circle(rotator.position, Direction3d::X, rotator.radius, Color::RED);
-    fluid_container_gizmos.circle(rotator.position, Direction3d::Y, rotator.radius, Color::GREEN);
-    fluid_container_gizmos.circle(rotator.position, Direction3d::Z, rotator.radius, Color::BLUE);
+
+    let mut color_x = Color::WHITE;
+    let mut color_y = Color::WHITE;
+    let mut color_z = Color::WHITE;
+    match rotator.state {
+        FluidContainerRotatorState::AroundX => {
+            color_x = Color::RED;
+        },
+        FluidContainerRotatorState::AroundY => {
+            color_y = Color::GREEN;
+        },
+        FluidContainerRotatorState::AroundZ => {
+            color_z = Color::BLUE;
+        },
+        _ => (),
+    }
+    fluid_container_gizmos.circle(rotator.position, Direction3d::X, rotator.radius, color_x);
+    fluid_container_gizmos.circle(rotator.position, Direction3d::Y, rotator.radius, color_y);
+    fluid_container_gizmos.circle(rotator.position, Direction3d::Z, rotator.radius, color_z);
+}
+
+
+fn change_rotator_state(
+    mut rotator: ResMut<FluidContainerRotator>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::ShiftLeft) {
+        rotator.state = match rotator.state {
+            FluidContainerRotatorState::Idle => FluidContainerRotatorState::AroundX,
+            FluidContainerRotatorState::AroundX => FluidContainerRotatorState::AroundY,
+            FluidContainerRotatorState::AroundY => FluidContainerRotatorState::AroundZ,
+            FluidContainerRotatorState::AroundZ => FluidContainerRotatorState::Idle,
+        };
+    }
+}
+
+
+fn rotate_container(
+    mut container: ResMut<FluidContainer>,
+    rotator: Res<FluidContainerRotator>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    if rotator.state == FluidContainerRotatorState::Idle {
+        return;
+    }
+
+    let mut angle = rotator.step;
+
+    if keyboard_input.pressed(KeyCode::ArrowLeft) {
+        angle *= -1.;
+    } else if keyboard_input.pressed(KeyCode::ArrowRight) {
+        // angle *= 1.;
+    } else {
+        return;
+    }
+
+    match rotator.state {
+        FluidContainerRotatorState::AroundX => {
+            container.transform.rotate_local_x(angle);
+        },
+        FluidContainerRotatorState::AroundY => {
+            container.transform.rotate_local_y(angle);
+        },
+        FluidContainerRotatorState::AroundZ => {
+            container.transform.rotate_local_z(angle);
+        },
+        _ => (),
+    }
 }
